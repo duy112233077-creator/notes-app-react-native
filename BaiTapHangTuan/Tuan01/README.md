@@ -1,4 +1,4 @@
-Sinh Viên : BÙI QUANG DUY
+Sinh Viên : BÙI QUANG DUY , LÊ DUY LINH
 A. CÂU HỎI ÔN TẬP LÝ THUYẾT
 Câu 1: Khái niệm & Lợi ích của Cơ sở mã duy nhất (Codebase)
 • Khái niệm phát triển ứng dụng mobile đa nền tảng (Cross-platform): Là phương pháp tạo ra các ứng dụng di động có khả năng chạy tương thích trên nhiều hệ điều hành khác nhau (như Android và iOS) bằng cách sử dụng một cơ sở mã (codebase) duy nhất. Trái ngược với phát triển Native (phải viết mã riêng biệt bằng Java/Kotlin cho Android và Swift/Objective-C cho iOS), phương pháp đa nền tảng giúp lập trình viên chỉ cần quản lý một dự án đơn lẻ.
