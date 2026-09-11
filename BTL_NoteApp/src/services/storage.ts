@@ -4,6 +4,7 @@ import Constants from 'expo-constants';
 import { Note } from '@/types/note';
 
 const STORAGE_KEY = '@noteapp_notes_list_v1';
+const PENDING_SYNC_KEY = '@noteapp_pending_sync_flag_v1';
 
 // Tự động nhận diện IP máy tính khi chạy trên điện thoại thật (qua Expo Go), máy ảo hoặc trình duyệt Web
 function getApiBaseUrl(): string {
@@ -76,9 +77,12 @@ const INITIAL_NOTES: Note[] = [
 ];
 
 export const NoteStorage = {
-  // Lấy dữ liệu ghi chú: Ưu tiên tải từ MySQL trên XAMPP, fallback về lưu trữ cục bộ
+  // Lấy dữ liệu ghi chú: Cơ chế tự động đồng bộ bù (Offline-to-Online Sync)
   async getNotes(): Promise<Note[]> {
-    // 1. Thử tải từ API MySQL
+    const localNotes = await this.loadFromLocalCache();
+    const hasPendingSync = await this.getPendingSyncFlag();
+
+    // 1. Thử kết nối tới MySQL trên XAMPP
     try {
       const controller = new AbortController();
       const timeoutId = setTimeout(() => controller.abort(), 2500);
@@ -89,33 +93,51 @@ export const NoteStorage = {
       clearTimeout(timeoutId);
 
       if (response.ok) {
+        // KHI MYSQL ĐÃ BẬT LẠI THÀNH CÔNG:
+
+        // A. Nếu có dữ liệu đã tạo/sửa lúc TẮT XAMPP (pending sync):
+        if (hasPendingSync) {
+          console.log('🔄 [Auto-Sync] Đã phát hiện XAMPP bật lại, tự động đẩy toàn bộ ghi chú offline vào MySQL...');
+          await this.syncToMySQL(localNotes);
+          await this.setPendingSyncFlag(false);
+          return localNotes;
+        }
+
+        // B. Nếu không có thay đổi offline, đọc dữ liệu mới nhất từ MySQL
         const data = await response.json();
         if (Array.isArray(data) && data.length > 0) {
-          // Lưu cache vào local
           await this.saveToLocalCache(data);
           return data;
         } else if (Array.isArray(data) && data.length === 0) {
-          // Nếu MySQL chưa có dữ liệu, nạp INITIAL_NOTES vào MySQL
-          await this.syncToMySQL(INITIAL_NOTES);
-          await this.saveToLocalCache(INITIAL_NOTES);
-          return INITIAL_NOTES;
+          // Nếu MySQL vừa tạo trống, đẩy danh sách ban đầu lên
+          const toSync = localNotes.length > 0 ? localNotes : INITIAL_NOTES;
+          await this.syncToMySQL(toSync);
+          await this.saveToLocalCache(toSync);
+          return toSync;
         }
       }
     } catch (apiErr) {
-      console.warn('⚠️ [API] Không kết nối được API MySQL, dùng dữ liệu bộ nhớ đệm:', apiErr);
+      console.warn('⚠️ [Offline] Chưa kết nối được MySQL trên XAMPP, chuyển sang dùng bộ nhớ máy cục bộ.');
     }
 
-    // 2. Fallback: Đọc từ bộ nhớ máy (Local Storage / AsyncStorage)
-    return await this.loadFromLocalCache();
+    // 2. Khi XAMPP đang TẮT: Đọc từ bộ nhớ máy (Local Storage / AsyncStorage)
+    return localNotes;
   },
 
-  // Lưu ghi chú: Lưu cục bộ và đồng bộ ngay lập tức vào MySQL
+  // Lưu ghi chú: Lưu cục bộ và đồng bộ ngay lên MySQL. Nếu MySQL tắt, đánh dấu để đồng bộ bù sau
   async saveNotes(notes: Note[]): Promise<void> {
-    // Lưu vào bộ nhớ máy ngay lập tức
+    // 1. Luôn lưu ngay vào bộ nhớ máy để đảm bảo không mất dữ liệu
     await this.saveToLocalCache(notes);
 
-    // Đồng bộ lên MySQL trên XAMPP
-    await this.syncToMySQL(notes);
+    // 2. Thử đồng bộ lên MySQL
+    const synced = await this.syncToMySQL(notes);
+    if (!synced) {
+      // Nếu XAMPP đang tắt, ghi nhận cờ "Pending Sync"
+      console.log('📝 [Offline Mode] Đã lưu vào bộ nhớ máy. Sẽ tự động cập nhật vào MySQL ngay khi bạn bật lại XAMPP!');
+      await this.setPendingSyncFlag(true);
+    } else {
+      await this.setPendingSyncFlag(false);
+    }
   },
 
   // Đồng bộ danh sách ghi chú lên MySQL
@@ -130,7 +152,6 @@ export const NoteStorage = {
       });
       return response.ok;
     } catch (err) {
-      console.warn('⚠️ [MySQL Sync] Chưa thể đồng bộ lên MySQL lúc này:', err);
       return false;
     }
   },
@@ -168,6 +189,33 @@ export const NoteStorage = {
     } catch (err) {
       console.error('Lỗi khi đọc cache:', err);
       return INITIAL_NOTES;
+    }
+  },
+
+  // Quản lý cờ đồng bộ bù (Pending Sync Flag)
+  async getPendingSyncFlag(): Promise<boolean> {
+    try {
+      let val: string | null = null;
+      if (Platform.OS === 'web' && typeof window !== 'undefined' && window.localStorage) {
+        val = window.localStorage.getItem(PENDING_SYNC_KEY);
+      } else {
+        val = await AsyncStorage.getItem(PENDING_SYNC_KEY);
+      }
+      return val === 'true';
+    } catch {
+      return false;
+    }
+  },
+
+  async setPendingSyncFlag(pending: boolean): Promise<void> {
+    try {
+      const val = pending ? 'true' : 'false';
+      if (Platform.OS === 'web' && typeof window !== 'undefined' && window.localStorage) {
+        window.localStorage.setItem(PENDING_SYNC_KEY, val);
+      }
+      await AsyncStorage.setItem(PENDING_SYNC_KEY, val);
+    } catch (err) {
+      console.error('Lỗi khi cập nhật cờ pending sync:', err);
     }
   },
 };
