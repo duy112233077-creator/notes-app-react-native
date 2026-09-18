@@ -2,6 +2,8 @@ import AsyncStorage from '@react-native-async-storage/async-storage';
 import { Platform } from 'react-native';
 import { Note } from '@/types/note';
 import { API_BASE_URL } from '@/constants/config';
+import { AuthService } from '@/services/authService';
+
 
 const STORAGE_KEY = '@noteapp_notes_list_v1';
 const PENDING_QUEUE_KEY = '@noteapp_pending_actions_v1';
@@ -70,8 +72,10 @@ export const NoteStorage = {
     try {
       const controller = new AbortController();
       const timeoutId = setTimeout(() => controller.abort(), 3000);
+      const headers = await AuthService.getAuthHeaders();
 
       const response = await fetch(`${API_BASE_URL}/notes`, {
+        headers,
         signal: controller.signal,
       });
       clearTimeout(timeoutId);
@@ -93,7 +97,7 @@ export const NoteStorage = {
             try {
               await fetch(`${API_BASE_URL}/notes`, {
                 method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
+                headers,
                 body: JSON.stringify(note),
               });
             } catch { /* bỏ qua lỗi từng note */ }
@@ -126,7 +130,7 @@ export const NoteStorage = {
             try {
               await fetch(`${API_BASE_URL}/notes`, {
                 method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
+                headers,
                 body: JSON.stringify(lNote),
               });
             } catch { /* ghi vào queue sau */ }
@@ -166,10 +170,11 @@ export const NoteStorage = {
     try {
       const controller = new AbortController();
       const timeoutId = setTimeout(() => controller.abort(), 3000);
+      const headers = await AuthService.getAuthHeaders();
 
       const response = await fetch(`${API_BASE_URL}/notes`, {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers,
         body: JSON.stringify(note),
         signal: controller.signal,
       });
@@ -198,9 +203,11 @@ export const NoteStorage = {
     try {
       const controller = new AbortController();
       const timeoutId = setTimeout(() => controller.abort(), 3000);
+      const headers = await AuthService.getAuthHeaders();
 
       const response = await fetch(`${API_BASE_URL}/notes/${id}`, {
         method: 'DELETE',
+        headers,
         signal: controller.signal,
       });
       clearTimeout(timeoutId);
@@ -216,6 +223,7 @@ export const NoteStorage = {
     await this.enqueuePendingAction({ type: 'DELETE', id, timestamp: Date.now() });
     return { success: true, synced: false };
   },
+
 
   // Lưu tương thích ngược cho danh sách mảng (gọi saveNotes)
   async saveNotes(notes: Note[]): Promise<void> {

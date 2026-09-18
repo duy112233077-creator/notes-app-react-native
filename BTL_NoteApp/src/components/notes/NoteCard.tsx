@@ -18,6 +18,7 @@ interface NoteCardProps {
   onDelete: (id: string) => void;
   onTogglePin: (id: string) => void;
   onRequestUnlock?: (note: Note, action: 'edit' | 'delete') => void;
+  onShare?: (note: Note) => void;
 }
 
 function formatDate(isoString: string): string {
@@ -44,6 +45,7 @@ export function NoteCard({
   onDelete,
   onTogglePin,
   onRequestUnlock,
+  onShare,
 }: NoteCardProps) {
   const scheme = useColorScheme();
   const isDark = scheme === 'dark';
@@ -103,7 +105,7 @@ export function NoteCard({
         },
         pressed && styles.pressed,
       ]}>
-      {/* Header card: Danh mục & Huy hiệu Khóa & Ghim */}
+      {/* Header card: Danh mục & Huy hiệu Khóa & Nhắc nhở & Ghim */}
       <View style={styles.cardHeader}>
         <View style={styles.headerBadges}>
           <View
@@ -128,6 +130,22 @@ export function NoteCard({
               ]}>
               <Ionicons name="lock-closed" size={11} color="#3B82F6" />
               <ThemedText style={styles.lockBadgeText}>ĐÃ KHÓA</ThemedText>
+            </View>
+          )}
+
+          {note.reminderAt && (
+            <View style={styles.reminderBadge}>
+              <Ionicons name="alarm-outline" size={11} color="#D97706" />
+              <ThemedText style={styles.reminderBadgeText}>
+                {new Date(note.reminderAt).toLocaleDateString('vi-VN', { month: '2-digit', day: '2-digit' })}
+              </ThemedText>
+            </View>
+          )}
+
+          {note.attachments && note.attachments.length > 0 && (
+            <View style={styles.mediaBadge}>
+              <Ionicons name="attach" size={12} color="#2563EB" />
+              <ThemedText style={styles.mediaBadgeText}>{note.attachments.length}</ThemedText>
             </View>
           )}
         </View>
@@ -188,6 +206,17 @@ export function NoteCard({
         </ThemedText>
       )}
 
+      {/* Tags nếu có */}
+      {note.tags && note.tags.length > 0 && (
+        <View style={styles.tagsRow}>
+          {note.tags.map((t, i) => (
+            <View key={i} style={styles.tagChip}>
+              <ThemedText style={styles.tagText}>{t}</ThemedText>
+            </View>
+          ))}
+        </View>
+      )}
+
       {/* Footer: Thời gian và thao tác */}
       <View style={styles.cardFooter}>
         <ThemedText
@@ -199,6 +228,18 @@ export function NoteCard({
         </ThemedText>
 
         <View style={styles.actions}>
+          {onShare && (
+            <Pressable
+              onPress={(e) => {
+                e.stopPropagation();
+                onShare(note);
+              }}
+              hitSlop={8}
+              style={styles.actionBtn}>
+              <Ionicons name="share-social-outline" size={17} color="#2563EB" />
+            </Pressable>
+          )}
+
           <Pressable
             onPress={(e) => {
               e.stopPropagation();
@@ -227,6 +268,7 @@ export function NoteCard({
     </Pressable>
   );
 }
+
 
 const styles = StyleSheet.create({
   card: {
@@ -289,6 +331,52 @@ const styles = StyleSheet.create({
     color: '#3B82F6',
     letterSpacing: 0.5,
   },
+  reminderBadge: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 3,
+    backgroundColor: '#FEF3C7',
+    paddingHorizontal: 7,
+    paddingVertical: 3,
+    borderRadius: 12,
+  },
+  reminderBadgeText: {
+    fontSize: 10,
+    fontWeight: '700',
+    color: '#D97706',
+  },
+  mediaBadge: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 2,
+    backgroundColor: '#EFF6FF',
+    paddingHorizontal: 7,
+    paddingVertical: 3,
+    borderRadius: 12,
+  },
+  mediaBadgeText: {
+    fontSize: 10,
+    fontWeight: '700',
+    color: '#2563EB',
+  },
+  tagsRow: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    gap: 4,
+    marginBottom: Spacing.two,
+  },
+  tagChip: {
+    backgroundColor: 'rgba(37, 99, 235, 0.08)',
+    paddingHorizontal: 8,
+    paddingVertical: 2,
+    borderRadius: 8,
+  },
+  tagText: {
+    fontSize: 11,
+    fontWeight: '600',
+    color: '#2563EB',
+  },
+
   pinBtn: {
     padding: 4,
   },

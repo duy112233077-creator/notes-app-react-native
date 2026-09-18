@@ -8,17 +8,24 @@ import {
   ScrollView,
   StyleSheet,
   TextInput,
+  TouchableOpacity,
   View,
   useColorScheme,
   useWindowDimensions,
+  ActivityIndicator,
+  Alert,
 } from 'react-native';
 
 import { ThemedText } from '@/components/themed-text';
 import { ThemedView } from '@/components/themed-view';
 import { PinModal } from '@/components/notes/PinModal';
+import { MediaPickerModal } from '@/components/MediaPickerModal';
 import { Colors, Spacing } from '@/constants/theme';
-import { NOTE_COLORS, Note, NoteCategory } from '@/types/note';
+import { NOTE_COLORS, Note, NoteCategory, MediaAttachment } from '@/types/note';
 import { NoteStorage } from '@/services/storage';
+import { AIService } from '@/services/aiService';
+import { ExportService } from '@/services/exportService';
+import { NotificationService } from '@/services/notificationService';
 
 interface NoteEditorModalProps {
   visible: boolean;
@@ -32,6 +39,9 @@ interface NoteEditorModalProps {
     colorId: string;
     isPinned: boolean;
     isLocked: boolean;
+    attachments?: MediaAttachment[];
+    reminderAt?: string;
+    tags?: string[];
   }) => void;
 }
 
@@ -61,25 +71,15 @@ export function NoteEditorModal({
   const [colorId, setColorId] = useState('default');
   const [isPinned, setIsPinned] = useState(false);
   const [isLocked, setIsLocked] = useState(false);
+  const [attachments, setAttachments] = useState<MediaAttachment[]>([]);
+  const [reminderAt, setReminderAt] = useState<string | undefined>(undefined);
+  const [tags, setTags] = useState<string[]>([]);
   const [errorMsg, setErrorMsg] = useState('');
-  const [pinModalVisible, setPinModalVisible] = useState(false);
 
-  const handleToggleLock = async () => {
-    if (!isLocked) {
-      // Đang bật khóa: kiểm tra đã có PIN chưa
-      const hasPinAlready = await NoteStorage.hasUserPin();
-      if (hasPinAlready) {
-        // Đã có PIN -> bật khóa luôn
-        setIsLocked(true);
-      } else {
-        // Chưa có PIN -> mở modal đặt PIN
-        setPinModalVisible(true);
-      }
-    } else {
-      // Đang tắt khóa: yêu cầu nhập PIN xác minh trước
-      setPinModalVisible(true);
-    }
-  };
+  const [pinModalVisible, setPinModalVisible] = useState(false);
+  const [mediaModalVisible, setMediaModalVisible] = useState(false);
+  const [aiLoading, setAiLoading] = useState(false);
+  const [summaryText, setSummaryText] = useState<string | null>(null);
 
   useEffect(() => {
     if (noteToEdit) {
@@ -89,6 +89,9 @@ export function NoteEditorModal({
       setColorId(noteToEdit.colorId || 'default');
       setIsPinned(noteToEdit.isPinned ?? false);
       setIsLocked(noteToEdit.isLocked ?? false);
+      setAttachments(noteToEdit.attachments || []);
+      setReminderAt(noteToEdit.reminderAt);
+      setTags(noteToEdit.tags || []);
     } else {
       setTitle('');
       setContent('');
@@ -96,9 +99,109 @@ export function NoteEditorModal({
       setColorId('default');
       setIsPinned(false);
       setIsLocked(false);
+      setAttachments([]);
+      setReminderAt(undefined);
+      setTags([]);
     }
     setErrorMsg('');
+    setSummaryText(null);
   }, [noteToEdit, visible]);
+
+  const handleToggleLock = async () => {
+    if (!isLocked) {
+      const hasPinAlready = await NoteStorage.hasUserPin();
+      if (hasPinAlready) {
+        setIsLocked(true);
+      } else {
+        setPinModalVisible(true);
+      }
+    } else {
+      setPinModalVisible(true);
+    }
+  };
+
+  // Nhắc nhở & Thông báo
+  const handleScheduleReminder = async () => {
+    if (Platform.OS === 'web') {
+      const input = window.prompt(
+        'Nhập thời gian nhắc nhở (Định dạng: YYYY-MM-DD HH:mm, ví dụ: 2026-09-20 09:00)',
+        new Date(Date.now() + 3600000 * 24).toISOString().slice(0, 16).replace('T', ' ')
+      );
+      if (input) {
+        const d = new Date(input);
+        if (isNaN(d.getTime())) {
+          alert('Thời gian không hợp lệ.');
+          return;
+        }
+        setReminderAt(d.toISOString());
+        alert(`Đã đặt nhắc nhở vào: ${d.toLocaleString('vi-VN')}`);
+      }
+    } else {
+      // Đặt nhắc nhở sau 1 giờ mặc định hoặc thời gian tùy chỉnh
+      const date = new Date(Date.now() + 3600000 * 2);
+      setReminderAt(date.toISOString());
+      await NotificationService.scheduleNoteReminder(
+        noteToEdit?.id || 'temp',
+        title || 'Ghi chú',
+        content || 'Nhắc nhở ghi chú',
+        date
+      );
+      Alert.alert('Đã hẹn giờ', `Thông báo sẽ gửi vào ${date.toLocaleString('vi-VN')}`);
+    }
+  };
+
+  // AI Summarize
+  const handleAISummarize = async () => {
+    if (!content.trim()) {
+      setErrorMsg('Vui lòng nhập nội dung ghi chú trước khi tóm tắt.');
+      return;
+    }
+    setAiLoading(true);
+    try {
+      const summary = await AIService.summarizeNote(title, content);
+      setSummaryText(summary);
+    } catch (err: any) {
+      setErrorMsg(err.message || 'Lỗi khi tóm tắt AI.');
+    } finally {
+      setAiLoading(false);
+    }
+  };
+
+  // AI Auto Tagging
+  const handleAIAutoTag = async () => {
+    setAiLoading(true);
+    try {
+      const generatedTags = await AIService.generateAutoTags(title, content);
+      setTags(generatedTags);
+    } catch (err: any) {
+      setErrorMsg(err.message || 'Lỗi khi tạo tag AI.');
+    } finally {
+      setAiLoading(false);
+    }
+  };
+
+  // Xuất file PDF/MD/TXT
+  const handleExport = async (format: 'pdf' | 'md' | 'txt') => {
+    const currentNote: Note = {
+      id: noteToEdit?.id || 'temp',
+      title: title || 'Ghi chú',
+      content,
+      category,
+      colorId,
+      attachments,
+      tags,
+      createdAt: noteToEdit?.createdAt || new Date().toISOString(),
+    };
+    try {
+      if (format === 'pdf') {
+        await ExportService.exportToPDF(currentNote);
+      } else {
+        await ExportService.exportToFile(currentNote, format);
+      }
+    } catch (err: any) {
+      Alert.alert('Lỗi xuất tệp', err.message || 'Không thể xuất tệp.');
+    }
+  };
 
   const handleSave = () => {
     if (!title.trim() && !content.trim()) {
@@ -114,6 +217,9 @@ export function NoteEditorModal({
       colorId,
       isPinned,
       isLocked,
+      attachments,
+      reminderAt,
+      tags,
     });
     onClose();
   };
@@ -145,7 +251,6 @@ export function NoteEditorModal({
             </ThemedText>
 
             <View style={styles.headerRightActions}>
-              {/* Nút bật/tắt Khóa bảo mật */}
               <Pressable
                 onPress={handleToggleLock}
                 style={[
@@ -164,7 +269,6 @@ export function NoteEditorModal({
                 />
               </Pressable>
 
-              {/* Nút ghim */}
               <Pressable
                 onPress={() => setIsPinned(!isPinned)}
                 style={[
@@ -183,7 +287,6 @@ export function NoteEditorModal({
                 />
               </Pressable>
 
-              {/* Nút đóng */}
               <Pressable onPress={onClose} style={styles.closeBtn} hitSlop={8}>
                 <Ionicons name="close" size={22} color={colors.textSecondary} />
               </Pressable>
@@ -193,29 +296,64 @@ export function NoteEditorModal({
           <ScrollView
             showsVerticalScrollIndicator={false}
             contentContainerStyle={styles.scrollContent}>
-            {/* Cảnh báo lỗi nếu có */}
             {!!errorMsg && (
               <ThemedText style={styles.errorText}>{errorMsg}</ThemedText>
             )}
 
-            {/* Banner hiển thị khi đang bật chế độ khóa */}
-            {isLocked && (
-              <View
-                style={[
-                  styles.lockBanner,
-                  {
-                    backgroundColor: isDark ? 'rgba(59, 130, 246, 0.15)' : '#EFF6FF',
-                    borderColor: isDark ? '#2563EB' : '#BFDBFE',
-                  },
-                ]}>
-                <Ionicons name="shield-checkmark" size={18} color="#3B82F6" />
-                <ThemedText style={[styles.lockBannerText, { color: isDark ? '#93C5FD' : '#1D4ED8' }]}>
-                  Ghi chú này đang được khóa bảo mật. Người xem cần nhập mã PIN (mặc định: 1234).
+            {/* Quick Toolbar: Attachments, Reminders, AI, Export */}
+            <View style={styles.toolbar}>
+              <TouchableOpacity
+                style={styles.toolBtn}
+                onPress={() => setMediaModalVisible(true)}>
+                <Ionicons name="attach-outline" size={18} color="#2563EB" />
+                <ThemedText style={styles.toolText}>
+                  {attachments.length > 0 ? `Đính kèm (${attachments.length})` : 'Đính kèm tệp'}
                 </ThemedText>
+              </TouchableOpacity>
+
+              <TouchableOpacity style={styles.toolBtn} onPress={handleScheduleReminder}>
+                <Ionicons name="alarm-outline" size={18} color="#D97706" />
+                <ThemedText style={styles.toolText}>
+                  {reminderAt
+                    ? new Date(reminderAt).toLocaleDateString('vi-VN', { month: '2-digit', day: '2-digit' })
+                    : 'Nhắc nhở'}
+                </ThemedText>
+              </TouchableOpacity>
+
+              <TouchableOpacity style={styles.toolBtn} onPress={handleAISummarize}>
+                <Ionicons name="sparkles-outline" size={18} color="#7C3AED" />
+                <ThemedText style={styles.toolText}>Tóm tắt AI</ThemedText>
+              </TouchableOpacity>
+
+              <TouchableOpacity style={styles.toolBtn} onPress={handleAIAutoTag}>
+                <Ionicons name="pricetag-outline" size={18} color="#059669" />
+                <ThemedText style={styles.toolText}>Tạo Tag AI</ThemedText>
+              </TouchableOpacity>
+            </View>
+
+            {/* AI Loading indicator */}
+            {aiLoading && (
+              <View style={styles.aiLoadingBox}>
+                <ActivityIndicator color="#7C3AED" />
+                <ThemedText style={styles.aiLoadingText}>AI đang xử lý nội dung ghi chú...</ThemedText>
               </View>
             )}
 
-            {/* Ô nhập tiêu đề */}
+            {/* Banner Tóm tắt AI */}
+            {summaryText && (
+              <View style={styles.summaryBox}>
+                <View style={styles.summaryHeader}>
+                  <Ionicons name="sparkles" size={16} color="#7C3AED" />
+                  <ThemedText style={styles.summaryTitle}>Kết quả Tóm tắt AI</ThemedText>
+                  <TouchableOpacity onPress={() => setSummaryText(null)}>
+                    <Ionicons name="close-circle" size={18} color="#94A3B8" />
+                  </TouchableOpacity>
+                </View>
+                <ThemedText style={styles.summaryContent}>{summaryText}</ThemedText>
+              </View>
+            )}
+
+            {/* Input Tiêu đề */}
             <ThemedText style={styles.label}>Tiêu đề ghi chú</ThemedText>
             <TextInput
               style={[
@@ -235,7 +373,7 @@ export function NoteEditorModal({
               }}
             />
 
-            {/* Chọn danh mục */}
+            {/* Select Danh mục */}
             <ThemedText style={styles.label}>Danh mục</ThemedText>
             <View style={styles.categoryWrap}>
               {CATEGORIES.map((cat) => {
@@ -273,7 +411,7 @@ export function NoteEditorModal({
               })}
             </View>
 
-            {/* Chọn màu thẻ ghi chú */}
+            {/* Select Màu sắc */}
             <ThemedText style={styles.label}>Màu sắc thẻ</ThemedText>
             <View style={styles.colorsWrap}>
               {NOTE_COLORS.map((c) => {
@@ -306,8 +444,22 @@ export function NoteEditorModal({
               })}
             </View>
 
-            {/* Ô nhập nội dung */}
-            <ThemedText style={styles.label}>Nội dung</ThemedText>
+            {/* Tags preview */}
+            {tags.length > 0 && (
+              <View style={styles.tagsContainer}>
+                <ThemedText style={styles.label}>Thẻ Tag AI:</ThemedText>
+                <View style={styles.tagsList}>
+                  {tags.map((t, idx) => (
+                    <View key={idx} style={styles.tagChip}>
+                      <ThemedText style={styles.tagText}>{t}</ThemedText>
+                    </View>
+                  ))}
+                </View>
+              </View>
+            )}
+
+            {/* Input Nội dung */}
+            <ThemedText style={styles.label}>Nội dung ghi chú</ThemedText>
             <TextInput
               style={[
                 styles.contentInput,
@@ -328,6 +480,26 @@ export function NoteEditorModal({
                 if (errorMsg) setErrorMsg('');
               }}
             />
+
+            {/* Export Toolbar */}
+            <View style={styles.exportRow}>
+              <ThemedText style={styles.exportLabel}>📤 Xuất ghi chú:</ThemedText>
+              <TouchableOpacity style={styles.exportBtn} onPress={() => handleExport('pdf')}>
+                <Ionicons name="document" size={14} color="#EF4444" />
+                <ThemedText style={styles.exportText}>PDF</ThemedText>
+              </TouchableOpacity>
+
+              <TouchableOpacity style={styles.exportBtn} onPress={() => handleExport('md')}>
+                <Ionicons name="code-slash" size={14} color="#2563EB" />
+                <ThemedText style={styles.exportText}>Markdown</ThemedText>
+              </TouchableOpacity>
+
+              <TouchableOpacity style={styles.exportBtn} onPress={() => handleExport('txt')}>
+                <Ionicons name="text" size={14} color="#475569" />
+                <ThemedText style={styles.exportText}>TXT</ThemedText>
+              </TouchableOpacity>
+            </View>
+
           </ScrollView>
 
           {/* Footer nút hành động */}
@@ -370,22 +542,25 @@ export function NoteEditorModal({
         </ThemedView>
       </KeyboardAvoidingView>
 
-      {/* PinModal: đặt PIN lần đầu hoặc xác minh để tắt khóa */}
+      {/* PinModal */}
       <PinModal
         visible={pinModalVisible}
         noteTitle={title || noteToEdit?.title}
         actionLabel={isLocked ? 'tắt khóa ghi chú' : 'kích hoạt khóa bảo mật'}
-        onSuccess={(newPin) => {
-          if (!isLocked) {
-            // Vừa đặt PIN thành công -> bật khóa
-            setIsLocked(true);
-          } else {
-            // Vừa xác minh PIN thành công -> tắt khóa
-            setIsLocked(false);
-          }
+        onSuccess={() => {
+          setIsLocked(!isLocked);
           setPinModalVisible(false);
         }}
         onClose={() => setPinModalVisible(false)}
+      />
+
+      {/* MediaPickerModal */}
+      <MediaPickerModal
+        visible={mediaModalVisible}
+        attachments={attachments}
+        onClose={() => setMediaModalVisible(false)}
+        onAddAttachment={(item) => setAttachments((prev) => [...prev, item])}
+        onRemoveAttachment={(id) => setAttachments((prev) => prev.filter((a) => a.id !== id))}
       />
     </Modal>
   );
@@ -412,17 +587,9 @@ const styles = StyleSheet.create({
     borderWidth: 1,
     overflow: 'hidden',
     maxHeight: '90%',
-    ...Platform.select({
-      web: {
-        boxShadow: '0 20px 40px rgba(0, 0, 0, 0.25)',
-      } as any,
-      default: {
-        elevation: 8,
-      },
-    }),
   },
   modalDesktop: {
-    maxWidth: 560,
+    maxWidth: 620,
   },
   modalMobile: {
     maxWidth: '100%',
@@ -455,31 +622,75 @@ const styles = StyleSheet.create({
   scrollContent: {
     padding: Spacing.four,
   },
+  toolbar: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    gap: 8,
+    marginBottom: 14,
+  },
+  toolBtn: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 4,
+    backgroundColor: '#F1F5F9',
+    paddingHorizontal: 10,
+    paddingVertical: 6,
+    borderRadius: 10,
+  },
+  toolText: {
+    fontSize: 12,
+    fontWeight: '600',
+    color: '#334155',
+  },
+  aiLoadingBox: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+    backgroundColor: '#F3E8FF',
+    padding: 10,
+    borderRadius: 10,
+    marginBottom: 12,
+  },
+  aiLoadingText: {
+    color: '#6B21A8',
+    fontSize: 13,
+    fontWeight: '600',
+  },
+  summaryBox: {
+    backgroundColor: '#F3E8FF',
+    borderColor: '#D8B4FE',
+    borderWidth: 1,
+    padding: 12,
+    borderRadius: 12,
+    marginBottom: 14,
+    gap: 6,
+  },
+  summaryHeader: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+  },
+  summaryTitle: {
+    fontSize: 13,
+    fontWeight: '700',
+    color: '#6B21A8',
+    flex: 1,
+    marginLeft: 6,
+  },
+  summaryContent: {
+    fontSize: 13,
+    color: '#3B0764',
+    lineHeight: 18,
+  },
   errorText: {
     color: '#EF4444',
     fontSize: 13,
     marginBottom: Spacing.two,
     fontWeight: '600',
   },
-  lockBanner: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 8,
-    paddingHorizontal: 12,
-    paddingVertical: 9,
-    borderRadius: 12,
-    borderWidth: 1,
-    marginBottom: Spacing.three,
-  },
-  lockBannerText: {
-    fontSize: 12.5,
-    fontWeight: '600',
-    flex: 1,
-    lineHeight: 18,
-  },
   label: {
-    fontSize: 13,
-    fontWeight: '600',
+    fontSize: 12,
+    fontWeight: '700',
     marginBottom: 6,
     textTransform: 'uppercase',
     letterSpacing: 0.5,
@@ -492,46 +703,92 @@ const styles = StyleSheet.create({
     paddingVertical: 10,
     fontSize: 16,
     fontWeight: '600',
-    marginBottom: Spacing.four,
-    outlineStyle: 'none',
-  } as any,
+    marginBottom: Spacing.three,
+  },
   categoryWrap: {
     flexDirection: 'row',
     flexWrap: 'wrap',
-    gap: 8,
-    marginBottom: Spacing.four,
+    gap: 6,
+    marginBottom: Spacing.three,
   },
   categoryBtn: {
-    paddingHorizontal: 13,
-    paddingVertical: 7,
-    borderRadius: 16,
+    paddingHorizontal: 12,
+    paddingVertical: 6,
+    borderRadius: 14,
   },
   categoryBtnText: {
-    fontSize: 13,
+    fontSize: 12.5,
   },
   colorsWrap: {
     flexDirection: 'row',
-    gap: 10,
-    marginBottom: Spacing.four,
+    gap: 8,
+    marginBottom: Spacing.three,
     flexWrap: 'wrap',
   },
   colorCircle: {
-    width: 32,
-    height: 32,
-    borderRadius: 16,
+    width: 30,
+    height: 30,
+    borderRadius: 15,
     justifyContent: 'center',
     alignItems: 'center',
+  },
+  tagsContainer: {
+    marginBottom: 12,
+  },
+  tagsList: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    gap: 6,
+    marginTop: 4,
+  },
+  tagChip: {
+    backgroundColor: '#DCFCE7',
+    paddingHorizontal: 10,
+    paddingVertical: 4,
+    borderRadius: 12,
+  },
+  tagText: {
+    color: '#166534',
+    fontSize: 12,
+    fontWeight: '600',
   },
   contentInput: {
     borderRadius: 12,
     borderWidth: 1,
     paddingHorizontal: Spacing.three,
     paddingVertical: Spacing.three,
-    fontSize: 15,
+    fontSize: 14.5,
     lineHeight: 22,
-    minHeight: 140,
-    outlineStyle: 'none',
-  } as any,
+    minHeight: 120,
+    marginBottom: 14,
+  },
+  exportRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+    marginBottom: 10,
+  },
+  exportLabel: {
+    fontSize: 12,
+    fontWeight: '700',
+    color: '#64748B',
+  },
+  exportBtn: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 4,
+    backgroundColor: '#F8FAFC',
+    borderWidth: 1,
+    borderColor: '#E2E8F0',
+    paddingHorizontal: 10,
+    paddingVertical: 6,
+    borderRadius: 8,
+  },
+  exportText: {
+    fontSize: 12,
+    fontWeight: '600',
+    color: '#334155',
+  },
   modalFooter: {
     flexDirection: 'row',
     justifyContent: 'flex-end',

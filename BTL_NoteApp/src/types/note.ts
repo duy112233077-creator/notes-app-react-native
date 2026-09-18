@@ -67,15 +67,43 @@ export const NOTE_COLORS: NoteColorOption[] = [
   },
 ];
 
+export interface MediaAttachment {
+  id: string;
+  type: 'image' | 'audio' | 'pdf' | 'file';
+  uri: string;
+  name: string;
+  size?: number;
+  duration?: number; // for audio recordings in seconds
+}
+
+export interface User {
+  id: string;
+  name: string;
+  email: string;
+  createdAt?: string;
+}
+
+export interface AuthSession {
+  user: User;
+  token: string;
+}
+
 export interface Note {
   id: string;
+  userId?: string;
   title: string;
   content: string;
   category?: NoteCategory;
   colorId?: string;
   isPinned?: boolean;
   isLocked?: boolean;
+  attachments?: MediaAttachment[];
+  reminderAt?: string;
+  shareCode?: string;
+  collaborators?: string[];
+  tags?: string[];
   createdAt: string;
   updatedAt?: string;
 }
+
 
