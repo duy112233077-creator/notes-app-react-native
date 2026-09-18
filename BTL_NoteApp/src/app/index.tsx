@@ -1,9 +1,7 @@
 import { Ionicons } from '@expo/vector-icons';
-import React, { useEffect, useMemo, useState } from 'react';
+import React, { useMemo, useState } from 'react';
 import {
   ActivityIndicator,
-  Alert,
-  Platform,
   Pressable,
   ScrollView,
   StyleSheet,
@@ -26,10 +24,9 @@ import { ThemedText } from '@/components/themed-text';
 import { ThemedView } from '@/components/themed-view';
 import { ToastConfig, ToastNotification, ToastType } from '@/components/ui/ToastNotification';
 import { Colors, Spacing } from '@/constants/theme';
-import { NoteStorage } from '@/services/storage';
-import { AuthService } from '@/services/authService';
-import { NotificationService } from '@/services/notificationService';
-import { Note, NoteCategory, User, AuthSession, MediaAttachment } from '@/types/note';
+import { Note } from '@/types/note';
+import { useNotesData } from '@/hooks/useNotesData';
+import { useRealtimeReminders } from '@/hooks/useRealtimeReminders';
 
 export default function HomeScreen() {
   const scheme = useColorScheme();
@@ -38,320 +35,47 @@ export default function HomeScreen() {
   const safeAreaInsets = useSafeAreaInsets();
   const { width } = useWindowDimensions();
 
-  // Responsive breakpoints
   const isDesktop = width >= 860;
   const isTablet = width >= 600 && width < 860;
   const numColumns = isDesktop ? 3 : isTablet ? 2 : 1;
 
-  const [notes, setNotes] = useState<Note[]>([]);
-  const [loading, setLoading] = useState(true);
   const [searchQuery, setSearchQuery] = useState('');
   const [selectedCategory, setSelectedCategory] = useState('Tất cả');
-
-  // Trạng thái đồng bộ: 'synced' (online & đã đồng bộ) | 'offline' (dùng bộ nhớ máy) | 'syncing' (đang kết nối)
-  const [syncStatus, setSyncStatus] = useState<'synced' | 'offline' | 'syncing'>('syncing');
-
-  // User Auth State
-  const [currentUser, setCurrentUser] = useState<User | null>(null);
-  const [authModalVisible, setAuthModalVisible] = useState(false);
-
-  // Share Modal State
-  const [shareModalVisible, setShareModalVisible] = useState(false);
-  const [selectedShareNote, setSelectedShareNote] = useState<Note | null>(null);
-
-  // Toast notification state
   const [toast, setToast] = useState<ToastConfig | null>(null);
-
-  // Modal editor state
-  const [isEditorVisible, setIsEditorVisible] = useState(false);
-  const [editingNote, setEditingNote] = useState<Note | null>(null);
-
-  // Real-time Reminder State
-  const [reminderAlertNote, setReminderAlertNote] = useState<Note | null>(null);
-  const [notifiedReminderIds] = useState(() => new Set<string>());
-
-  // Modal PIN bảo mật
-  const [pinModalVisible, setPinModalVisible] = useState(false);
-  const [pendingUnlockNote, setPendingUnlockNote] = useState<Note | null>(null);
-  const [pendingUnlockAction, setPendingUnlockAction] = useState<'edit' | 'delete' | null>(null);
 
   const showToast = (message: string, type: ToastType = 'success', subMessage?: string) => {
     setToast({ message, type, subMessage });
   };
 
-  const formatCurrentTime = (): string => {
-    const now = new Date();
-    return now.toLocaleTimeString('vi-VN', { hour: '2-digit', minute: '2-digit' });
-  };
+  const {
+    notes,
+    loading,
+    syncStatus,
+    currentUser,
+    handleLoginSuccess,
+    handleLogout,
+    handleSaveNote,
+    handleDeleteNote,
+    handleTogglePin,
+    handleUpdateNoteShare,
+  } = useNotesData(showToast);
 
-  // Load user session & notes
-  useEffect(() => {
-    initApp();
-  }, []);
+  const { reminderAlertNote, setReminderAlertNote } = useRealtimeReminders(notes);
 
-  // Real-time reminder interval checker (runs every 4 seconds)
-  useEffect(() => {
-    const checkReminders = () => {
-      if (notes.length === 0) return;
-      const nowMs = Date.now();
-      for (const n of notes) {
-        if (n.reminderAt && !notifiedReminderIds.has(n.id)) {
-          const remTime = new Date(n.reminderAt).getTime();
-          if (!isNaN(remTime) && remTime <= nowMs) {
-            notifiedReminderIds.add(n.id);
-            setReminderAlertNote(n);
-            NotificationService.triggerInstantNotification(
-              `⏰ Nhắc nhở ghi chú: ${n.title}`,
-              n.content || 'Đã đến giờ hẹn ghi chú của bạn!'
-            );
-            break;
-          }
-        }
-      }
-    };
-    checkReminders();
-    const interval = setInterval(checkReminders, 4000);
-    return () => clearInterval(interval);
-  }, [notes, notifiedReminderIds]);
+  const [authModalVisible, setAuthModalVisible] = useState(false);
+  const [shareModalVisible, setShareModalVisible] = useState(false);
+  const [selectedShareNote, setSelectedShareNote] = useState<Note | null>(null);
+  const [isEditorVisible, setIsEditorVisible] = useState(false);
+  const [editingNote, setEditingNote] = useState<Note | null>(null);
+  const [pinModalVisible, setPinModalVisible] = useState(false);
+  const [pendingUnlockNote, setPendingUnlockNote] = useState<Note | null>(null);
+  const [pendingUnlockAction, setPendingUnlockAction] = useState<'edit' | 'delete' | null>(null);
 
-  const initApp = async () => {
-    const session = await AuthService.getStoredSession();
-    if (session) {
-      setCurrentUser(session.user);
-    }
-    await loadNotes();
-  };
-
-  const loadNotes = async () => {
-    setLoading(true);
-    setSyncStatus('syncing');
-
-    const health = await NoteStorage.checkServerHealth();
-    if (health.online && health.dbReady) {
-      setSyncStatus('synced');
-    } else {
-      setSyncStatus('offline');
-    }
-
-    const session = await AuthService.getStoredSession();
-    const user = session ? session.user : null;
-
-    let allNotes = await NoteStorage.getNotes();
-
-    // 1. Chuyển tất cả ghi chú hiện tại chưa có owner thành tài khoản 'duy'
-    let migrated = false;
-    allNotes = allNotes.map((n) => {
-      const isSample = ['note-1', 'note-2', 'note-3', 'note-4'].includes(n.id) || n.userId === 'sample';
-      if (!isSample && !n.userId) {
-        migrated = true;
-        return { ...n, userId: 'duy' };
-      }
-      return n;
-    });
-
-    if (migrated) {
-      await NoteStorage.saveToLocalCache(allNotes);
-    }
-
-    // 2. Lọc ghi chú theo phân quyền tài khoản & chia sẻ
-    let userNotes: Note[] = [];
-
-    if (user) {
-      const uId = user.id.toLowerCase();
-      const uEmail = user.email.toLowerCase();
-      const uName = user.name.toLowerCase();
-      const isDuyAccount = uName.includes('duy') || uEmail.includes('duy') || uId === 'duy';
-
-      userNotes = allNotes.filter((n) => {
-        // Ghi chú mẫu dùng chung cho tất cả
-        const isSample = ['note-1', 'note-2', 'note-3', 'note-4'].includes(n.id) || n.userId === 'sample';
-        if (isSample) return true;
-
-        // Ghi chú thuộc sở hữu của tài khoản này
-        const nOwner = (n.userId || '').toLowerCase();
-        const isOwner =
-          nOwner === uId ||
-          nOwner === uEmail ||
-          nOwner === uName ||
-          (isDuyAccount && (nOwner === 'duy' || !nOwner));
-
-        if (isOwner) return true;
-
-        // Ghi chú được người khác chia sẻ đích danh cho tài khoản này
-        const isCollaborator = n.collaborators?.some(
-          (c) => c.toLowerCase() === uEmail || c.toLowerCase() === uName || c.toLowerCase() === uId
-        );
-
-        return Boolean(isCollaborator);
-      });
-    } else {
-      // Chế độ chưa đăng nhập (Khách / Duy)
-      userNotes = allNotes.filter((n) => {
-        const isSample = ['note-1', 'note-2', 'note-3', 'note-4'].includes(n.id) || n.userId === 'sample';
-        const isDuyOrGuest = !n.userId || n.userId === 'duy' || n.userId === 'guest';
-        return isSample || isDuyOrGuest;
-      });
-    }
-
-    setNotes(userNotes);
-    setLoading(false);
-  };
-
-  // Auth Handlers
-  const handleLoginSuccess = async (session: AuthSession) => {
-    setCurrentUser(session.user);
-    showToast(`Xin chào ${session.user.name}!`, 'success', 'Đã đăng nhập thành công.');
-    await loadNotes();
-  };
-
-  const handleLogout = async () => {
-    await AuthService.clearSession();
-    setCurrentUser(null);
-    setAuthModalVisible(false);
-    showToast('Đã đăng xuất', 'info', 'Đã quay về chế độ ghi chú cá nhân.');
-    await loadNotes();
-  };
-
-  // Thử đồng bộ lại
-  const handleManualSync = async () => {
-    setSyncStatus('syncing');
-    showToast('Đang kết nối lại CSDL...', 'info');
-    const health = await NoteStorage.checkServerHealth();
-    if (health.online && health.dbReady) {
-      await NoteStorage.syncPendingQueue();
-      const fresh = await NoteStorage.getNotes();
-      setNotes(fresh);
-      setSyncStatus('synced');
-      showToast('Đã kết nối MySQL thành công!', 'success', 'Dữ liệu đã được cập nhật đồng bộ.');
-    } else {
-      setSyncStatus('offline');
-      showToast('Chưa kết nối được MySQL trên XAMPP', 'warning', 'Ứng dụng vẫn lưu an toàn trên bộ nhớ máy.');
-    }
-  };
-
-  // Lưu ghi chú
-  const handleSaveNote = async (data: {
-    id?: string;
-    title: string;
-    content: string;
-    category: NoteCategory;
-    colorId: string;
-    isPinned: boolean;
-    isLocked: boolean;
-    attachments?: MediaAttachment[];
-    reminderAt?: string;
-    tags?: string[];
-  }) => {
-    const now = new Date().toISOString();
-    const isUpdating = Boolean(data.id);
-    const targetId = data.id || `note-${Date.now()}-${Math.random().toString(36).substring(2, 6)}`;
-
-    const noteToSave: Note = {
-      id: targetId,
-      userId: isUpdating && editingNote?.userId ? editingNote.userId : (currentUser ? currentUser.id : 'duy'),
-      collaborators: isUpdating && editingNote ? editingNote.collaborators : [],
-      shareCode: isUpdating && editingNote ? editingNote.shareCode : undefined,
-      title: data.title,
-      content: data.content,
-      category: data.category,
-      colorId: data.colorId,
-      isPinned: data.isPinned,
-      isLocked: data.isLocked,
-      attachments: data.attachments,
-      reminderAt: data.reminderAt,
-      tags: data.tags,
-      createdAt: isUpdating && editingNote ? editingNote.createdAt : now,
-      updatedAt: now,
-    };
-
-    if (isUpdating) {
-      setNotes((prev) => prev.map((n) => (n.id === targetId ? noteToSave : n)));
-    } else {
-      setNotes((prev) => [noteToSave, ...prev]);
-    }
-
-    const result = await NoteStorage.saveSingleNote(noteToSave);
-    const timeStr = formatCurrentTime();
-
-    await NoteStorage.logActivity(
-      isUpdating ? 'SỬA' : 'THÊM',
-      targetId,
-      data.title,
-      isUpdating ? `Đã cập nhật ghi chú "${data.title}"` : `Đã tạo ghi chú mới "${data.title}"`
-    );
-
-    if (result.synced) {
-      setSyncStatus('synced');
-      showToast(`Đã lưu lúc ${timeStr}`, 'success', 'Đã cập nhật trực tiếp vào MySQL.');
-    } else {
-      setSyncStatus('offline');
-      showToast(`Đã lưu cục bộ lúc ${timeStr}`, 'info', 'Đã lưu trên máy. Sẽ đồng bộ bù khi kết nối.');
-    }
-  };
-
-  // Xóa ghi chú
-  const handleDeleteNote = async (id: string) => {
-    const noteToDelete = notes.find((n) => n.id === id);
-    setNotes((prev) => prev.filter((n) => n.id !== id));
-    const result = await NoteStorage.deleteSingleNote(id);
-    await NoteStorage.logActivity(
-      'XÓA',
-      id,
-      noteToDelete?.title || 'Ghi chú',
-      `Đã xóa ghi chú "${noteToDelete?.title || id}"`
-    );
-    if (result.synced) {
-      showToast('Đã xóa ghi chú', 'success', 'Đã xóa khỏi MySQL.');
-    } else {
-      showToast('Đã xóa khỏi máy', 'info', 'Sẽ xóa trên MySQL khi có kết nối.');
-    }
-  };
-
-  // Đổi ghim
-  const handleTogglePin = async (id: string) => {
-    const target = notes.find((n) => n.id === id);
-    if (!target) return;
-
-    const updated: Note = {
-      ...target,
-      isPinned: !target.isPinned,
-      updatedAt: new Date().toISOString(),
-    };
-
-    setNotes((prev) => prev.map((n) => (n.id === id ? updated : n)));
-    const result = await NoteStorage.saveSingleNote(updated);
-
-    showToast(
-      updated.isPinned ? '📌 Đã ghim ghi chú lên đầu' : 'Đã bỏ ghim ghi chú',
-      'info',
-      result.synced ? 'Đã đồng bộ MySQL' : 'Lưu cục bộ'
-    );
-  };
-
-  // Open Share Modal
   const handleOpenShare = (note: Note) => {
     setSelectedShareNote(note);
     setShareModalVisible(true);
   };
 
-  const handleUpdateNoteShare = async (shareCode: string, collaborators: string[]) => {
-    if (!selectedShareNote) return;
-    const updated: Note = {
-      ...selectedShareNote,
-      shareCode,
-      collaborators,
-    };
-    setNotes((prev) => prev.map((n) => (n.id === updated.id ? updated : n)));
-    await NoteStorage.saveSingleNote(updated);
-    await NoteStorage.logActivity(
-      'CHIA SẺ',
-      updated.id,
-      updated.title,
-      `Đã chia sẻ ghi chú với ${collaborators.length} thành viên (Mã: ${shareCode})`
-    );
-  };
-
-  // Unlock handlers
   const handleRequestUnlock = (note: Note, action: 'edit' | 'delete') => {
     setPendingUnlockNote(note);
     setPendingUnlockAction(action);
@@ -369,29 +93,6 @@ export default function HomeScreen() {
     setPendingUnlockAction(null);
   };
 
-  // Search & Filter
-  const filteredNotes = useMemo(() => {
-    return notes.filter((note) => {
-      const matchCategory =
-        selectedCategory === 'Tất cả' || note.category === selectedCategory;
-      const query = searchQuery.trim().toLowerCase();
-      const matchQuery =
-        !query ||
-        note.title.toLowerCase().includes(query) ||
-        (!note.isLocked && note.content.toLowerCase().includes(query));
-      return matchCategory && matchQuery;
-    });
-  }, [notes, selectedCategory, searchQuery]);
-
-  const pinnedNotes = useMemo(
-    () => filteredNotes.filter((n) => n.isPinned),
-    [filteredNotes]
-  );
-  const otherNotes = useMemo(
-    () => filteredNotes.filter((n) => !n.isPinned),
-    [filteredNotes]
-  );
-
   const openCreateModal = () => {
     setEditingNote(null);
     setIsEditorVisible(true);
@@ -402,31 +103,51 @@ export default function HomeScreen() {
     setIsEditorVisible(true);
   };
 
-  const renderNoteColumns = (items: Note[]) => {
+  const filteredNotes = useMemo(() => {
+    return notes.filter((n) => {
+      const matchCat =
+        selectedCategory === 'Tất cả' || n.category === selectedCategory;
+      const matchSearch =
+        searchQuery.trim() === '' ||
+        n.title.toLowerCase().includes(searchQuery.toLowerCase()) ||
+        n.content.toLowerCase().includes(searchQuery.toLowerCase()) ||
+        (n.tags && n.tags.some((t) => t.toLowerCase().includes(searchQuery.toLowerCase())));
+      return matchCat && matchSearch;
+    });
+  }, [notes, searchQuery, selectedCategory]);
+
+  const pinnedNotes = useMemo(() => filteredNotes.filter((n) => n.isPinned), [filteredNotes]);
+  const otherNotes = useMemo(() => filteredNotes.filter((n) => !n.isPinned), [filteredNotes]);
+
+  const renderNoteColumns = (list: Note[]) => {
     if (numColumns === 1) {
-      return items.map((note) => (
-        <NoteCard
-          key={note.id}
-          note={note}
-          onEdit={openEditModal}
-          onDelete={handleDeleteNote}
-          onTogglePin={handleTogglePin}
-          onRequestUnlock={handleRequestUnlock}
-          onShare={handleOpenShare}
-        />
-      ));
+      return (
+        <View style={styles.listContainer}>
+          {list.map((note) => (
+            <NoteCard
+              key={note.id}
+              note={note}
+              onEdit={openEditModal}
+              onDelete={handleDeleteNote}
+              onTogglePin={handleTogglePin}
+              onRequestUnlock={handleRequestUnlock}
+              onShare={handleOpenShare}
+            />
+          ))}
+        </View>
+      );
     }
 
     const columns: Note[][] = Array.from({ length: numColumns }, () => []);
-    items.forEach((item, index) => {
-      columns[index % numColumns].push(item);
+    list.forEach((n, idx) => {
+      columns[idx % numColumns].push(n);
     });
 
     return (
       <View style={styles.gridContainer}>
-        {columns.map((col, colIdx) => (
+        {columns.map((colNotes, colIdx) => (
           <View key={colIdx} style={styles.gridColumn}>
-            {col.map((note) => (
+            {colNotes.map((note) => (
               <NoteCard
                 key={note.id}
                 note={note}
@@ -454,41 +175,46 @@ export default function HomeScreen() {
             paddingBottom: safeAreaInsets.bottom + 90,
           },
         ]}>
-        <View style={styles.mainWrapper}>
+        <View style={styles.container}>
           {/* Header */}
           <View style={styles.header}>
             <View style={styles.headerLeft}>
-              <View style={styles.headerTitleRow}>
-                <View style={styles.logoIcon}>
-                  <Ionicons name="document-text" size={22} color="#FFFFFF" />
-                </View>
-                <ThemedText style={styles.appName}>Ghi Chú</ThemedText>
-
-                {/* Status Badge */}
-                <Pressable
-                  onPress={handleManualSync}
-                  hitSlop={6}
-                  style={({ pressed }) => [
+              <View style={styles.brandRow}>
+                <ThemedText style={styles.headerTitle}>Note App</ThemedText>
+                <View
+                  style={[
                     styles.syncBadge,
-                    syncStatus === 'synced'
-                      ? styles.syncBadgeOnline
-                      : syncStatus === 'syncing'
-                        ? styles.syncBadgeSyncing
-                        : styles.syncBadgeOffline,
-                    pressed && { opacity: 0.75 },
+                    {
+                      backgroundColor:
+                        syncStatus === 'synced'
+                          ? isDark
+                            ? 'rgba(16, 185, 129, 0.2)'
+                            : '#DCFCE7'
+                          : syncStatus === 'syncing'
+                            ? isDark
+                              ? 'rgba(59, 130, 246, 0.2)'
+                              : '#DBEAFE'
+                            : isDark
+                              ? 'rgba(234, 179, 8, 0.2)'
+                              : '#FEF9C3',
+                    },
                   ]}>
-                  <View
-                    style={[
-                      styles.syncDot,
-                      {
-                        backgroundColor:
-                          syncStatus === 'synced'
-                            ? '#10B981'
-                            : syncStatus === 'syncing'
-                              ? '#3B82F6'
-                              : '#F59E0B',
-                      },
-                    ]}
+                  <Ionicons
+                    name={
+                      syncStatus === 'synced'
+                        ? 'checkmark-circle'
+                        : syncStatus === 'syncing'
+                          ? 'sync-circle'
+                          : 'cloud-offline'
+                    }
+                    size={14}
+                    color={
+                      syncStatus === 'synced'
+                        ? '#10B981'
+                        : syncStatus === 'syncing'
+                          ? '#2563EB'
+                          : '#D97706'
+                    }
                   />
                   <ThemedText
                     style={[
@@ -496,54 +222,55 @@ export default function HomeScreen() {
                       {
                         color:
                           syncStatus === 'synced'
-                            ? '#059669'
+                            ? isDark
+                              ? '#34D399'
+                              : '#15803D'
                             : syncStatus === 'syncing'
-                              ? '#2563EB'
-                              : '#D97706',
+                              ? isDark
+                                ? '#60A5FA'
+                                : '#1D4ED8'
+                              : isDark
+                                ? '#FBBF24'
+                                : '#B45309',
                       },
                     ]}>
                     {syncStatus === 'synced'
-                      ? 'Đã kết nối CSDL'
+                      ? 'MySQL Online'
                       : syncStatus === 'syncing'
                         ? 'Đang kết nối...'
-                        : 'Ngoại tuyến (Offline)'}
+                        : 'Lưu bộ nhớ máy'}
                   </ThemedText>
-                  <Ionicons
-                    name="refresh"
-                    size={11}
-                    color={
-                      syncStatus === 'synced'
-                        ? '#059669'
-                        : syncStatus === 'syncing'
-                          ? '#2563EB'
-                          : '#D97706'
-                    }
-                  />
-                </Pressable>
+                </View>
               </View>
 
               <ThemedText style={[styles.headerSubtitle, { color: colors.textSecondary }]}>
-                {notes.length} ghi chú • {notes.filter((n) => n.isPinned).length} đã ghim •{' '}
-                {notes.filter((n) => n.isLocked).length} đã khóa
+                Quản lý ghi chú cá nhân & đồng bộ bảo mật
               </ThemedText>
             </View>
 
-            {/* Header Right: User Account Button & Add Note */}
-            <View style={styles.headerRightGroup}>
+            <View style={styles.headerRight}>
               <TouchableOpacity
-                style={styles.userAuthBtn}
+                style={[
+                  styles.userAuthBtn,
+                  {
+                    backgroundColor: currentUser
+                      ? isDark
+                        ? '#1E2A3A'
+                        : '#EFF6FF'
+                      : isDark
+                        ? '#272B35'
+                        : '#F1F5F9',
+                  },
+                ]}
                 onPress={() => setAuthModalVisible(true)}>
-                {currentUser ? (
-                  <View style={styles.userAvatarBadge}>
-                    <ThemedText style={styles.avatarLetter}>{currentUser.name.charAt(0).toUpperCase()}</ThemedText>
-                  </View>
-                ) : (
-                  <View style={styles.loginBadge}>
-                    <Ionicons name="person-circle-outline" size={24} color="#2563EB" />
-                    <ThemedText style={styles.loginBadgeText}>Đăng nhập</ThemedText>
-                  </View>
-                )}
-
+                <Ionicons
+                  name={currentUser ? 'person-circle' : 'person-circle-outline'}
+                  size={22}
+                  color={currentUser ? '#2563EB' : colors.textSecondary}
+                />
+                <ThemedText style={[styles.userAuthText, { color: currentUser ? '#2563EB' : colors.text }]}>
+                  {currentUser ? currentUser.name : 'Đăng nhập'}
+                </ThemedText>
               </TouchableOpacity>
 
               <Pressable
@@ -554,7 +281,7 @@ export default function HomeScreen() {
                   pressed && { opacity: 0.85 },
                 ]}>
                 <Ionicons name="add" size={20} color="#FFFFFF" />
-                <ThemedText style={styles.addBtnText}>Thêm ghi chú</ThemedText>
+                <ThemedText style={styles.addBtnText}>Ghi chú mới</ThemedText>
               </Pressable>
             </View>
           </View>
@@ -569,7 +296,7 @@ export default function HomeScreen() {
             />
           </View>
 
-          {/* List Content */}
+          {/* Content */}
           {loading ? (
             <View style={styles.loadingContainer}>
               <ActivityIndicator size="large" color="#2563EB" />
@@ -612,16 +339,8 @@ export default function HomeScreen() {
                 <View style={styles.section}>
                   {pinnedNotes.length > 0 && (
                     <View style={styles.sectionHeader}>
-                      <Ionicons
-                        name="albums-outline"
-                        size={16}
-                        color={colors.textSecondary}
-                      />
-                      <ThemedText style={styles.sectionTitle}>
-                        {selectedCategory === 'Tất cả'
-                          ? 'GHI CHÚ KHÁC'
-                          : selectedCategory.toUpperCase()}
-                      </ThemedText>
+                      <Ionicons name="document-text-outline" size={16} color={colors.textSecondary} />
+                      <ThemedText style={styles.sectionTitle}>GHI CHÚ KHÁC</ThemedText>
                       <View
                         style={[
                           styles.countBadge,
@@ -657,7 +376,7 @@ export default function HomeScreen() {
         visible={isEditorVisible}
         noteToEdit={editingNote}
         onClose={() => setIsEditorVisible(false)}
-        onSave={handleSaveNote}
+        onSave={(data) => handleSaveNote(data, editingNote)}
       />
 
       <PinModal
@@ -684,7 +403,7 @@ export default function HomeScreen() {
         visible={shareModalVisible}
         note={selectedShareNote}
         onClose={() => setShareModalVisible(false)}
-        onUpdateNoteShare={handleUpdateNoteShare}
+        onUpdateNoteShare={(shareCode, collaborators) => handleUpdateNoteShare(selectedShareNote, shareCode, collaborators)}
       />
 
       <ReminderAlertModal
@@ -710,74 +429,35 @@ const styles = StyleSheet.create({
     flex: 1,
   },
   contentContainer: {
-    alignItems: 'center',
-    paddingHorizontal: Spacing.three,
+    paddingHorizontal: Spacing.four,
   },
-  mainWrapper: {
+  container: {
+    maxWidth: 1200,
     width: '100%',
-    maxWidth: 1060,
+    alignSelf: 'center',
   },
   header: {
     flexDirection: 'row',
     justifyContent: 'space-between',
     alignItems: 'center',
     marginBottom: Spacing.four,
+    gap: 12,
   },
   headerLeft: {
-    gap: 4,
+    flex: 1,
   },
-  headerRightGroup: {
+  headerRight: {
     flexDirection: 'row',
     alignItems: 'center',
     gap: 10,
   },
-  userAuthBtn: {
-    padding: 2,
-  },
-  userAvatarBadge: {
-    width: 36,
-    height: 36,
-    borderRadius: 18,
-    backgroundColor: '#2563EB',
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-  avatarLetter: {
-    color: '#FFFFFF',
-    fontWeight: '800',
-    fontSize: 16,
-  },
-  loginBadge: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 4,
-    backgroundColor: '#EFF6FF',
-    paddingHorizontal: 10,
-    paddingVertical: 6,
-    borderRadius: 12,
-    borderWidth: 1,
-    borderColor: '#BFDBFE',
-  },
-  loginBadgeText: {
-    color: '#2563EB',
-    fontWeight: '600',
-    fontSize: 13,
-  },
-  headerTitleRow: {
+  brandRow: {
     flexDirection: 'row',
     alignItems: 'center',
     gap: 10,
-    flexWrap: 'wrap',
+    marginBottom: 4,
   },
-  logoIcon: {
-    width: 38,
-    height: 38,
-    borderRadius: 10,
-    backgroundColor: '#2563EB',
-    justifyContent: 'center',
-    alignItems: 'center',
-  },
-  appName: {
+  headerTitle: {
     fontSize: 24,
     fontWeight: '800',
     letterSpacing: -0.5,
@@ -785,29 +465,10 @@ const styles = StyleSheet.create({
   syncBadge: {
     flexDirection: 'row',
     alignItems: 'center',
-    gap: 6,
     paddingHorizontal: 8,
-    paddingVertical: 3.5,
+    paddingVertical: 3,
     borderRadius: 12,
-    borderWidth: 1,
-    marginLeft: 4,
-  },
-  syncBadgeOnline: {
-    backgroundColor: 'rgba(16, 185, 129, 0.12)',
-    borderColor: 'rgba(16, 185, 129, 0.3)',
-  },
-  syncBadgeOffline: {
-    backgroundColor: 'rgba(245, 158, 11, 0.12)',
-    borderColor: 'rgba(245, 158, 11, 0.3)',
-  },
-  syncBadgeSyncing: {
-    backgroundColor: 'rgba(59, 130, 246, 0.12)',
-    borderColor: 'rgba(59, 130, 246, 0.3)',
-  },
-  syncDot: {
-    width: 7,
-    height: 7,
-    borderRadius: 3.5,
+    gap: 4,
   },
   syncBadgeText: {
     fontSize: 11,
@@ -816,6 +477,18 @@ const styles = StyleSheet.create({
   headerSubtitle: {
     fontSize: 13,
     fontWeight: '500',
+  },
+  userAuthBtn: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
+    paddingHorizontal: 12,
+    paddingVertical: 8,
+    borderRadius: 12,
+  },
+  userAuthText: {
+    fontSize: 13,
+    fontWeight: '600',
   },
   addNoteBtn: {
     flexDirection: 'row',
@@ -880,5 +553,10 @@ const styles = StyleSheet.create({
     borderRadius: 28,
     justifyContent: 'center',
     alignItems: 'center',
+    shadowColor: '#2563EB',
+    shadowOffset: { width: 0, height: 4 },
+    shadowOpacity: 0.4,
+    shadowRadius: 8,
+    elevation: 6,
   },
 });

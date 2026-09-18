@@ -1,5 +1,5 @@
 import { Ionicons } from '@expo/vector-icons';
-import React, { useCallback, useEffect, useState } from 'react';
+import React, { useEffect, useState } from 'react';
 import {
   KeyboardAvoidingView,
   Modal,
@@ -10,7 +10,6 @@ import {
   TextInput,
   TouchableOpacity,
   View,
-  Image,
   useColorScheme,
   useWindowDimensions,
   ActivityIndicator,
@@ -24,8 +23,11 @@ import { MediaPickerModal } from '@/components/MediaPickerModal';
 import { VoiceToTextModal } from '@/components/VoiceToTextModal';
 import { AttachmentViewerModal } from '@/components/AttachmentViewerModal';
 import { ReminderPickerModal } from '@/components/ReminderPickerModal';
+import { EditorCategoryPicker } from '@/components/notes/editor/EditorCategoryPicker';
+import { EditorColorPicker } from '@/components/notes/editor/EditorColorPicker';
+import { EditorAttachmentStrip } from '@/components/notes/editor/EditorAttachmentStrip';
 import { Colors, Spacing } from '@/constants/theme';
-import { NOTE_COLORS, Note, NoteCategory, MediaAttachment, DEFAULT_CATEGORIES } from '@/types/note';
+import { Note, NoteCategory, MediaAttachment, DEFAULT_CATEGORIES } from '@/types/note';
 import { NoteStorage } from '@/services/storage';
 import { AIService } from '@/services/aiService';
 import { ExportService } from '@/services/exportService';
@@ -48,8 +50,6 @@ interface NoteEditorModalProps {
     tags?: string[];
   }) => void;
 }
-
-// Categories are loaded dynamically from storage including custom ones
 
 export function NoteEditorModal({
   visible,
@@ -83,8 +83,6 @@ export function NoteEditorModal({
   const [summaryText, setSummaryText] = useState<string | null>(null);
   const [isFullscreen, setIsFullscreen] = useState(false);
   const [allCategories, setAllCategories] = useState<NoteCategory[]>(DEFAULT_CATEGORIES);
-  const [newCatInput, setNewCatInput] = useState('');
-  const [showAddCat, setShowAddCat] = useState(false);
 
   // Load custom categories
   useEffect(() => {
@@ -134,11 +132,6 @@ export function NoteEditorModal({
     }
   };
 
-  // Nhắc nhở & Thông báo
-  const handleScheduleReminder = () => {
-    setReminderPickerVisible(true);
-  };
-
   const handleConfirmReminder = async (isoString: string) => {
     setReminderAt(isoString);
     const dateObj = new Date(isoString);
@@ -152,17 +145,6 @@ export function NoteEditorModal({
     }
   };
 
-  const handleAddCustomCategory = async () => {
-    const clean = newCatInput.trim();
-    if (!clean) return;
-    const updated = await NoteStorage.addCustomCategory(clean);
-    setAllCategories(updated);
-    setCategory(clean);
-    setNewCatInput('');
-    setShowAddCat(false);
-  };
-
-  // AI Summarize
   const handleAISummarize = async () => {
     if (!content.trim()) {
       setErrorMsg('Vui lòng nhập nội dung ghi chú trước khi tóm tắt.');
@@ -179,7 +161,6 @@ export function NoteEditorModal({
     }
   };
 
-  // AI Auto Tagging
   const handleAIAutoTag = async () => {
     setAiLoading(true);
     try {
@@ -192,7 +173,6 @@ export function NoteEditorModal({
     }
   };
 
-  // Xuất file PDF/MD/TXT
   const handleExport = async (format: 'pdf' | 'md' | 'txt') => {
     const currentNote: Note = {
       id: noteToEdit?.id || 'temp',
@@ -264,7 +244,6 @@ export function NoteEditorModal({
             </ThemedText>
 
             <View style={styles.headerRightActions}>
-              {/* Fullscreen toggle */}
               <Pressable
                 onPress={() => setIsFullscreen((f) => !f)}
                 style={styles.iconToggleBtn}
@@ -318,32 +297,24 @@ export function NoteEditorModal({
             </View>
           </View>
 
-          <ScrollView
-            showsVerticalScrollIndicator={false}
-            contentContainerStyle={styles.scrollContent}>
-            {!!errorMsg && (
-              <ThemedText style={styles.errorText}>{errorMsg}</ThemedText>
-            )}
+          <ScrollView showsVerticalScrollIndicator={false} contentContainerStyle={styles.scrollContent}>
+            {!!errorMsg && <ThemedText style={styles.errorText}>{errorMsg}</ThemedText>}
 
-            {/* Quick Toolbar: Attachments, Voice, Reminders, AI, Export */}
+            {/* Toolbar */}
             <View style={styles.toolbar}>
-              <TouchableOpacity
-                style={styles.toolBtn}
-                onPress={() => setMediaModalVisible(true)}>
+              <TouchableOpacity style={styles.toolBtn} onPress={() => setMediaModalVisible(true)}>
                 <Ionicons name="attach-outline" size={18} color="#2563EB" />
                 <ThemedText style={styles.toolText}>
                   {attachments.length > 0 ? `Đính kèm (${attachments.length})` : 'Đính kèm tệp'}
                 </ThemedText>
               </TouchableOpacity>
 
-              <TouchableOpacity
-                style={styles.toolBtn}
-                onPress={() => setVoiceToTextVisible(true)}>
+              <TouchableOpacity style={styles.toolBtn} onPress={() => setVoiceToTextVisible(true)}>
                 <Ionicons name="mic-outline" size={18} color="#0891B2" />
                 <ThemedText style={styles.toolText}>Giọng nói → Chữ</ThemedText>
               </TouchableOpacity>
 
-              <TouchableOpacity style={styles.toolBtn} onPress={handleScheduleReminder}>
+              <TouchableOpacity style={styles.toolBtn} onPress={() => setReminderPickerVisible(true)}>
                 <Ionicons name="alarm-outline" size={18} color="#D97706" />
                 <ThemedText style={styles.toolText}>
                   {reminderAt
@@ -363,7 +334,6 @@ export function NoteEditorModal({
               </TouchableOpacity>
             </View>
 
-            {/* AI Loading indicator */}
             {aiLoading && (
               <View style={styles.aiLoadingBox}>
                 <ActivityIndicator color="#7C3AED" />
@@ -371,7 +341,6 @@ export function NoteEditorModal({
               </View>
             )}
 
-            {/* Banner Tóm tắt AI */}
             {summaryText && (
               <View style={styles.summaryBox}>
                 <View style={styles.summaryHeader}>
@@ -405,114 +374,24 @@ export function NoteEditorModal({
               }}
             />
 
-            {/* Attachment Thumbnail Strip */}
-            {attachments.length > 0 && (
-              <View style={styles.attachStripWrap}>
-                <ThemedText style={styles.label}>Tệp đính kèm</ThemedText>
-                <ScrollView horizontal showsHorizontalScrollIndicator={false} style={styles.attachStrip}>
-                  {attachments.map((att) => (
-                    <TouchableOpacity
-                      key={att.id}
-                      style={styles.attachThumb}
-                      onPress={() => setViewerAttachment(att)}>
-                      {att.type === 'image' ? (
-                        <Image source={{ uri: att.uri }} style={styles.thumbImg} resizeMode="cover" />
-                      ) : att.type === 'video' ? (
-                        <View style={[styles.thumbImg, styles.thumbVideo]}>
-                          <Ionicons name="videocam" size={22} color="#FFFFFF" />
-                        </View>
-                      ) : att.type === 'audio' ? (
-                        <View style={[styles.thumbImg, styles.thumbAudio]}>
-                          <Ionicons name="musical-notes" size={22} color="#FFFFFF" />
-                        </View>
-                      ) : (
-                        <View style={[styles.thumbImg, styles.thumbFile]}>
-                          <Ionicons name="document-text" size={22} color="#FFFFFF" />
-                        </View>
-                      )}
-                      <TouchableOpacity
-                        style={styles.thumbRemove}
-                        onPress={() => setAttachments((prev) => prev.filter((a) => a.id !== att.id))}>
-                        <Ionicons name="close-circle" size={16} color="#EF4444" />
-                      </TouchableOpacity>
-                    </TouchableOpacity>
-                  ))}
-                </ScrollView>
-              </View>
-            )}
+            {/* Sub-components */}
+            <EditorAttachmentStrip
+              attachments={attachments}
+              onOpenViewer={setViewerAttachment}
+              onRemoveAttachment={(id) => setAttachments((prev) => prev.filter((a) => a.id !== id))}
+            />
 
-            {/* Select Danh mục */}
-            <ThemedText style={styles.label}>Danh mục</ThemedText>
-            <View style={styles.categoryWrap}>
-              {allCategories.map((cat) => {
-                const isSelected = category === cat;
-                return (
-                  <Pressable
-                    key={cat}
-                    onPress={() => setCategory(cat)}
-                    style={[
-                      styles.categoryBtn,
-                      {
-                        backgroundColor: isSelected
-                          ? '#2563EB'
-                          : isDark
-                            ? '#2A303F'
-                            : '#F1F5F9',
-                      },
-                    ]}>
-                    <ThemedText
-                      style={[
-                        styles.categoryBtnText,
-                        {
-                          color: isSelected
-                            ? '#FFFFFF'
-                            : isDark
-                              ? '#E2E8F0'
-                              : '#475569',
-                          fontWeight: isSelected ? '700' : '500',
-                        },
-                      ]}>
-                      {cat}
-                    </ThemedText>
-                  </Pressable>
-                );
-              })}
-            </View>
+            <EditorCategoryPicker
+              categories={allCategories}
+              selectedCategory={category}
+              onSelectCategory={setCategory}
+            />
 
-            {/* Select Màu sắc */}
-            <ThemedText style={styles.label}>Màu sắc thẻ</ThemedText>
-            <View style={styles.colorsWrap}>
-              {NOTE_COLORS.map((c) => {
-                const isSelected = colorId === c.id;
-                return (
-                  <Pressable
-                    key={c.id}
-                    onPress={() => setColorId(c.id)}
-                    style={[
-                      styles.colorCircle,
-                      {
-                        backgroundColor: isDark ? c.bgDark : c.bgLight,
-                        borderColor: isSelected
-                          ? '#2563EB'
-                          : isDark
-                            ? c.borderDark
-                            : c.borderLight,
-                        borderWidth: isSelected ? 2.5 : 1.5,
-                      },
-                    ]}>
-                    {isSelected && (
-                      <Ionicons
-                        name="checkmark"
-                        size={15}
-                        color={isDark ? '#FFFFFF' : '#0F172A'}
-                      />
-                    )}
-                  </Pressable>
-                );
-              })}
-            </View>
+            <EditorColorPicker
+              selectedColorId={colorId}
+              onSelectColor={setColorId}
+            />
 
-            {/* Tags preview */}
             {tags.length > 0 && (
               <View style={styles.tagsContainer}>
                 <ThemedText style={styles.label}>Thẻ Tag AI:</ThemedText>
@@ -568,35 +447,19 @@ export function NoteEditorModal({
                 <ThemedText style={styles.exportText}>TXT</ThemedText>
               </TouchableOpacity>
             </View>
-
           </ScrollView>
 
-          {/* Footer nút hành động */}
-          <View
-            style={[
-              styles.modalFooter,
-              { borderTopColor: isDark ? '#2E3440' : '#E2E8F0' },
-            ]}>
+          {/* Footer */}
+          <View style={[styles.modalFooter, { borderTopColor: isDark ? '#2E3440' : '#E2E8F0' }]}>
             <Pressable
               onPress={onClose}
-              style={[
-                styles.cancelBtn,
-                {
-                  backgroundColor: isDark ? '#272B35' : '#F1F5F9',
-                },
-              ]}>
-              <ThemedText
-                style={[
-                  styles.cancelBtnText,
-                  { color: isDark ? '#E2E8F0' : '#475569' },
-                ]}>
+              style={[styles.cancelBtn, { backgroundColor: isDark ? '#272B35' : '#F1F5F9' }]}>
+              <ThemedText style={[styles.cancelBtnText, { color: isDark ? '#E2E8F0' : '#475569' }]}>
                 Hủy bỏ
               </ThemedText>
             </Pressable>
 
-            <Pressable
-              onPress={handleSave}
-              style={[styles.saveBtn, { backgroundColor: '#2563EB' }]}>
+            <Pressable onPress={handleSave} style={[styles.saveBtn, { backgroundColor: '#2563EB' }]}>
               <Ionicons
                 name={noteToEdit ? 'checkmark-circle-outline' : 'add-circle-outline'}
                 size={18}
@@ -611,7 +474,7 @@ export function NoteEditorModal({
         </ThemedView>
       </KeyboardAvoidingView>
 
-      {/* PinModal */}
+      {/* Modals */}
       <PinModal
         visible={pinModalVisible}
         noteTitle={title || noteToEdit?.title}
@@ -623,7 +486,6 @@ export function NoteEditorModal({
         onClose={() => setPinModalVisible(false)}
       />
 
-      {/* MediaPickerModal */}
       <MediaPickerModal
         visible={mediaModalVisible}
         attachments={attachments}
@@ -632,7 +494,6 @@ export function NoteEditorModal({
         onRemoveAttachment={(id) => setAttachments((prev) => prev.filter((a) => a.id !== id))}
       />
 
-      {/* VoiceToTextModal */}
       <VoiceToTextModal
         visible={voiceToTextVisible}
         onClose={() => setVoiceToTextVisible(false)}
@@ -642,7 +503,6 @@ export function NoteEditorModal({
         }}
       />
 
-      {/* AttachmentViewerModal */}
       {viewerAttachment && (
         <AttachmentViewerModal
           visible={!!viewerAttachment}
@@ -651,7 +511,6 @@ export function NoteEditorModal({
         />
       )}
 
-      {/* ReminderPickerModal */}
       <ReminderPickerModal
         visible={reminderPickerVisible}
         initialDate={reminderAt}
@@ -688,33 +547,31 @@ const styles = StyleSheet.create({
     width: '100%',
     borderRadius: 20,
     borderWidth: 1,
-    overflow: 'hidden',
     maxHeight: '90%',
-  },
-  modalBoxFullscreen: {
-    maxHeight: '100%',
-    height: '100%',
-    borderRadius: 0,
-    borderWidth: 0,
-    maxWidth: '100%',
+    overflow: 'hidden',
   },
   modalDesktop: {
-    maxWidth: 620,
+    maxWidth: 680,
   },
   modalMobile: {
     maxWidth: '100%',
+  },
+  modalBoxFullscreen: {
+    maxWidth: '100%',
+    height: '100%',
+    maxHeight: '100%',
+    borderRadius: 0,
   },
   modalHeader: {
     flexDirection: 'row',
     justifyContent: 'space-between',
     alignItems: 'center',
-    paddingHorizontal: Spacing.four,
-    paddingVertical: Spacing.three,
-    borderBottomWidth: StyleSheet.hairlineWidth,
-    borderBottomColor: 'rgba(150, 150, 150, 0.2)',
+    padding: Spacing.three,
+    borderBottomWidth: 1,
+    borderBottomColor: 'rgba(148, 163, 184, 0.15)',
   },
   modalTitle: {
-    fontSize: 18,
+    fontSize: 16,
     fontWeight: '700',
   },
   headerRightActions: {
@@ -723,14 +580,23 @@ const styles = StyleSheet.create({
     gap: 8,
   },
   iconToggleBtn: {
-    padding: 6,
+    width: 34,
+    height: 34,
     borderRadius: 10,
+    justifyContent: 'center',
+    alignItems: 'center',
   },
   closeBtn: {
-    padding: 6,
+    padding: 4,
   },
   scrollContent: {
-    padding: Spacing.four,
+    padding: Spacing.three,
+  },
+  errorText: {
+    color: '#EF4444',
+    fontSize: 13,
+    marginBottom: 10,
+    fontWeight: '600',
   },
   toolbar: {
     flexDirection: 'row',
@@ -741,8 +607,10 @@ const styles = StyleSheet.create({
   toolBtn: {
     flexDirection: 'row',
     alignItems: 'center',
-    gap: 4,
-    backgroundColor: '#F1F5F9',
+    gap: 5,
+    backgroundColor: '#F8FAFC',
+    borderWidth: 1,
+    borderColor: '#E2E8F0',
     paddingHorizontal: 10,
     paddingVertical: 6,
     borderRadius: 10,
@@ -756,55 +624,45 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     alignItems: 'center',
     gap: 8,
+    marginBottom: 12,
     backgroundColor: '#F3E8FF',
     padding: 10,
     borderRadius: 10,
-    marginBottom: 12,
   },
   aiLoadingText: {
-    color: '#6B21A8',
-    fontSize: 13,
+    fontSize: 12,
+    color: '#7C3AED',
     fontWeight: '600',
   },
   summaryBox: {
     backgroundColor: '#F3E8FF',
-    borderColor: '#D8B4FE',
-    borderWidth: 1,
     padding: 12,
     borderRadius: 12,
     marginBottom: 14,
-    gap: 6,
   },
   summaryHeader: {
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'space-between',
+    marginBottom: 6,
   },
   summaryTitle: {
     fontSize: 13,
     fontWeight: '700',
-    color: '#6B21A8',
+    color: '#7C3AED',
     flex: 1,
     marginLeft: 6,
   },
   summaryContent: {
     fontSize: 13,
-    color: '#3B0764',
-    lineHeight: 18,
-  },
-  errorText: {
-    color: '#EF4444',
-    fontSize: 13,
-    marginBottom: Spacing.two,
-    fontWeight: '600',
+    color: '#4C1D95',
+    lineHeight: 19,
   },
   label: {
-    fontSize: 12,
+    fontSize: 13,
     fontWeight: '700',
     marginBottom: 6,
-    textTransform: 'uppercase',
-    letterSpacing: 0.5,
-    opacity: 0.75,
+    opacity: 0.8,
   },
   titleInput: {
     borderRadius: 12,
@@ -814,33 +672,6 @@ const styles = StyleSheet.create({
     fontSize: 16,
     fontWeight: '600',
     marginBottom: Spacing.three,
-  },
-  categoryWrap: {
-    flexDirection: 'row',
-    flexWrap: 'wrap',
-    gap: 6,
-    marginBottom: Spacing.three,
-  },
-  categoryBtn: {
-    paddingHorizontal: 12,
-    paddingVertical: 6,
-    borderRadius: 14,
-  },
-  categoryBtnText: {
-    fontSize: 12.5,
-  },
-  colorsWrap: {
-    flexDirection: 'row',
-    gap: 8,
-    marginBottom: Spacing.three,
-    flexWrap: 'wrap',
-  },
-  colorCircle: {
-    width: 30,
-    height: 30,
-    borderRadius: 15,
-    justifyContent: 'center',
-    alignItems: 'center',
   },
   tagsContainer: {
     marginBottom: 12,
@@ -875,68 +706,6 @@ const styles = StyleSheet.create({
   contentInputFullscreen: {
     minHeight: 300,
     flex: 1,
-  },
-  attachStripWrap: {
-    marginBottom: 12,
-  },
-  attachStrip: {
-    flexDirection: 'row',
-  },
-  attachThumb: {
-    width: 72,
-    height: 72,
-    borderRadius: 10,
-    marginRight: 8,
-    position: 'relative',
-  },
-  thumbImg: {
-    width: 72,
-    height: 72,
-    borderRadius: 10,
-    backgroundColor: '#94A3B8',
-  },
-  thumbVideo: {
-    backgroundColor: '#1D4ED8',
-    justifyContent: 'center',
-    alignItems: 'center',
-  },
-  thumbAudio: {
-    backgroundColor: '#0E7490',
-    justifyContent: 'center',
-    alignItems: 'center',
-  },
-  thumbFile: {
-    backgroundColor: '#475569',
-    justifyContent: 'center',
-    alignItems: 'center',
-  },
-  thumbRemove: {
-    position: 'absolute',
-    top: -4,
-    right: -4,
-    backgroundColor: '#FFFFFF',
-    borderRadius: 10,
-  },
-  addCatRow: {
-    flexDirection: 'row',
-    gap: 8,
-    marginBottom: 12,
-    marginTop: -4,
-  },
-  addCatInput: {
-    flex: 1,
-    borderRadius: 10,
-    borderWidth: 1,
-    paddingHorizontal: 12,
-    paddingVertical: 8,
-    fontSize: 13,
-  },
-  addCatBtn: {
-    backgroundColor: '#2563EB',
-    borderRadius: 10,
-    paddingHorizontal: 14,
-    justifyContent: 'center',
-    alignItems: 'center',
   },
   exportRow: {
     flexDirection: 'row',
