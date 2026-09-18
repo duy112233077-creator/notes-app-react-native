@@ -15,8 +15,10 @@ import {
 
 import { ThemedText } from '@/components/themed-text';
 import { ThemedView } from '@/components/themed-view';
+import { PinModal } from '@/components/notes/PinModal';
 import { Colors, Spacing } from '@/constants/theme';
 import { NOTE_COLORS, Note, NoteCategory } from '@/types/note';
+import { NoteStorage } from '@/services/storage';
 
 interface NoteEditorModalProps {
   visible: boolean;
@@ -29,6 +31,7 @@ interface NoteEditorModalProps {
     category: NoteCategory;
     colorId: string;
     isPinned: boolean;
+    isLocked: boolean;
   }) => void;
 }
 
@@ -57,7 +60,26 @@ export function NoteEditorModal({
   const [category, setCategory] = useState<NoteCategory>('Công việc');
   const [colorId, setColorId] = useState('default');
   const [isPinned, setIsPinned] = useState(false);
+  const [isLocked, setIsLocked] = useState(false);
   const [errorMsg, setErrorMsg] = useState('');
+  const [pinModalVisible, setPinModalVisible] = useState(false);
+
+  const handleToggleLock = async () => {
+    if (!isLocked) {
+      // Đang bật khóa: kiểm tra đã có PIN chưa
+      const hasPinAlready = await NoteStorage.hasUserPin();
+      if (hasPinAlready) {
+        // Đã có PIN -> bật khóa luôn
+        setIsLocked(true);
+      } else {
+        // Chưa có PIN -> mở modal đặt PIN
+        setPinModalVisible(true);
+      }
+    } else {
+      // Đang tắt khóa: yêu cầu nhập PIN xác minh trước
+      setPinModalVisible(true);
+    }
+  };
 
   useEffect(() => {
     if (noteToEdit) {
@@ -66,12 +88,14 @@ export function NoteEditorModal({
       setCategory(noteToEdit.category || 'Công việc');
       setColorId(noteToEdit.colorId || 'default');
       setIsPinned(noteToEdit.isPinned ?? false);
+      setIsLocked(noteToEdit.isLocked ?? false);
     } else {
       setTitle('');
       setContent('');
       setCategory('Công việc');
       setColorId('default');
       setIsPinned(false);
+      setIsLocked(false);
     }
     setErrorMsg('');
   }, [noteToEdit, visible]);
@@ -89,6 +113,7 @@ export function NoteEditorModal({
       category,
       colorId,
       isPinned,
+      isLocked,
     });
     onClose();
   };
@@ -102,7 +127,6 @@ export function NoteEditorModal({
       <KeyboardAvoidingView
         behavior={Platform.OS === 'ios' ? 'padding' : undefined}
         style={styles.backdrop}>
-        {/* Lớp nền mờ */}
         <Pressable style={styles.backdropPressable} onPress={onClose} />
 
         <ThemedView
@@ -121,17 +145,45 @@ export function NoteEditorModal({
             </ThemedText>
 
             <View style={styles.headerRightActions}>
+              {/* Nút bật/tắt Khóa bảo mật */}
+              <Pressable
+                onPress={handleToggleLock}
+                style={[
+                  styles.iconToggleBtn,
+                  isLocked && {
+                    backgroundColor: isDark ? 'rgba(59, 130, 246, 0.25)' : '#DBEAFE',
+                    borderColor: '#3B82F6',
+                    borderWidth: 1,
+                  },
+                ]}
+                hitSlop={8}>
+                <Ionicons
+                  name={isLocked ? 'lock-closed' : 'lock-open-outline'}
+                  size={19}
+                  color={isLocked ? '#3B82F6' : colors.textSecondary}
+                />
+              </Pressable>
+
+              {/* Nút ghim */}
               <Pressable
                 onPress={() => setIsPinned(!isPinned)}
-                style={styles.pinToggleBtn}
+                style={[
+                  styles.iconToggleBtn,
+                  isPinned && {
+                    backgroundColor: isDark ? 'rgba(234, 179, 8, 0.25)' : '#FEF9C3',
+                    borderColor: '#EAB308',
+                    borderWidth: 1,
+                  },
+                ]}
                 hitSlop={8}>
                 <Ionicons
                   name={isPinned ? 'pin' : 'pin-outline'}
-                  size={20}
+                  size={19}
                   color={isPinned ? '#EAB308' : colors.textSecondary}
                 />
               </Pressable>
 
+              {/* Nút đóng */}
               <Pressable onPress={onClose} style={styles.closeBtn} hitSlop={8}>
                 <Ionicons name="close" size={22} color={colors.textSecondary} />
               </Pressable>
@@ -144,6 +196,23 @@ export function NoteEditorModal({
             {/* Cảnh báo lỗi nếu có */}
             {!!errorMsg && (
               <ThemedText style={styles.errorText}>{errorMsg}</ThemedText>
+            )}
+
+            {/* Banner hiển thị khi đang bật chế độ khóa */}
+            {isLocked && (
+              <View
+                style={[
+                  styles.lockBanner,
+                  {
+                    backgroundColor: isDark ? 'rgba(59, 130, 246, 0.15)' : '#EFF6FF',
+                    borderColor: isDark ? '#2563EB' : '#BFDBFE',
+                  },
+                ]}>
+                <Ionicons name="shield-checkmark" size={18} color="#3B82F6" />
+                <ThemedText style={[styles.lockBannerText, { color: isDark ? '#93C5FD' : '#1D4ED8' }]}>
+                  Ghi chú này đang được khóa bảo mật. Người xem cần nhập mã PIN (mặc định: 1234).
+                </ThemedText>
+              </View>
             )}
 
             {/* Ô nhập tiêu đề */}
@@ -300,6 +369,24 @@ export function NoteEditorModal({
           </View>
         </ThemedView>
       </KeyboardAvoidingView>
+
+      {/* PinModal: đặt PIN lần đầu hoặc xác minh để tắt khóa */}
+      <PinModal
+        visible={pinModalVisible}
+        noteTitle={title || noteToEdit?.title}
+        actionLabel={isLocked ? 'tắt khóa ghi chú' : 'kích hoạt khóa bảo mật'}
+        onSuccess={(newPin) => {
+          if (!isLocked) {
+            // Vừa đặt PIN thành công -> bật khóa
+            setIsLocked(true);
+          } else {
+            // Vừa xác minh PIN thành công -> tắt khóa
+            setIsLocked(false);
+          }
+          setPinModalVisible(false);
+        }}
+        onClose={() => setPinModalVisible(false)}
+      />
     </Modal>
   );
 }
@@ -356,13 +443,14 @@ const styles = StyleSheet.create({
   headerRightActions: {
     flexDirection: 'row',
     alignItems: 'center',
-    gap: Spacing.two,
+    gap: 8,
   },
-  pinToggleBtn: {
-    padding: 4,
+  iconToggleBtn: {
+    padding: 6,
+    borderRadius: 10,
   },
   closeBtn: {
-    padding: 4,
+    padding: 6,
   },
   scrollContent: {
     padding: Spacing.four,
@@ -372,6 +460,22 @@ const styles = StyleSheet.create({
     fontSize: 13,
     marginBottom: Spacing.two,
     fontWeight: '600',
+  },
+  lockBanner: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+    paddingHorizontal: 12,
+    paddingVertical: 9,
+    borderRadius: 12,
+    borderWidth: 1,
+    marginBottom: Spacing.three,
+  },
+  lockBannerText: {
+    fontSize: 12.5,
+    fontWeight: '600',
+    flex: 1,
+    lineHeight: 18,
   },
   label: {
     fontSize: 13,

@@ -2,6 +2,7 @@ import { Ionicons } from '@expo/vector-icons';
 import React, { useEffect, useMemo, useState } from 'react';
 import {
   ActivityIndicator,
+  Alert,
   Platform,
   Pressable,
   ScrollView,
@@ -15,9 +16,11 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { EmptyState } from '@/components/notes/EmptyState';
 import { NoteCard } from '@/components/notes/NoteCard';
 import { NoteEditorModal } from '@/components/notes/NoteEditorModal';
+import { PinModal } from '@/components/notes/PinModal';
 import { SearchBar } from '@/components/notes/SearchBar';
 import { ThemedText } from '@/components/themed-text';
 import { ThemedView } from '@/components/themed-view';
+import { ToastConfig, ToastNotification, ToastType } from '@/components/ui/ToastNotification';
 import { Colors, Spacing } from '@/constants/theme';
 import { NoteStorage } from '@/services/storage';
 import { Note, NoteCategory } from '@/types/note';
@@ -39,29 +42,70 @@ export default function HomeScreen() {
   const [searchQuery, setSearchQuery] = useState('');
   const [selectedCategory, setSelectedCategory] = useState('Tất cả');
 
+  // Trạng thái đồng bộ: 'synced' (online & đã đồng bộ) | 'offline' (dùng bộ nhớ máy) | 'syncing' (đang kết nối)
+  const [syncStatus, setSyncStatus] = useState<'synced' | 'offline' | 'syncing'>('syncing');
+
+  // Toast notification state
+  const [toast, setToast] = useState<ToastConfig | null>(null);
+
   // Modal editor state
   const [isEditorVisible, setIsEditorVisible] = useState(false);
   const [editingNote, setEditingNote] = useState<Note | null>(null);
 
-  // Load notes on mount
+  // Modal PIN bảo mật
+  const [pinModalVisible, setPinModalVisible] = useState(false);
+  const [pendingUnlockNote, setPendingUnlockNote] = useState<Note | null>(null);
+  const [pendingUnlockAction, setPendingUnlockAction] = useState<'edit' | 'delete' | null>(null);
+
+  const showToast = (message: string, type: ToastType = 'success', subMessage?: string) => {
+    setToast({ message, type, subMessage });
+  };
+
+  const formatCurrentTime = (): string => {
+    const now = new Date();
+    return now.toLocaleTimeString('vi-VN', { hour: '2-digit', minute: '2-digit' });
+  };
+
+  // Load notes & kiểm tra trạng thái CSDL
   useEffect(() => {
     loadNotes();
   }, []);
 
   const loadNotes = async () => {
     setLoading(true);
+    setSyncStatus('syncing');
+
+    // Kiểm tra sức khỏe kết nối server
+    const health = await NoteStorage.checkServerHealth();
+    if (health.online && health.dbReady) {
+      setSyncStatus('synced');
+    } else {
+      setSyncStatus('offline');
+    }
+
     const data = await NoteStorage.getNotes();
     setNotes(data);
     setLoading(false);
   };
 
-  // Lưu và cập nhật danh sách
-  const saveAndSyncNotes = async (newNotes: Note[]) => {
-    setNotes(newNotes);
-    await NoteStorage.saveNotes(newNotes);
+  // Bấm nút thử đồng bộ lại
+  const handleManualSync = async () => {
+    setSyncStatus('syncing');
+    showToast('Đang kết nối lại CSDL...', 'info');
+    const health = await NoteStorage.checkServerHealth();
+    if (health.online && health.dbReady) {
+      await NoteStorage.syncPendingQueue();
+      const fresh = await NoteStorage.getNotes();
+      setNotes(fresh);
+      setSyncStatus('synced');
+      showToast('Đã kết nối MySQL thành công!', 'success', 'Dữ liệu đã được cập nhật đồng bộ.');
+    } else {
+      setSyncStatus('offline');
+      showToast('Chưa kết nối được MySQL trên XAMPP', 'warning', 'Ứng dụng vẫn lưu an toàn trên bộ nhớ máy.');
+    }
   };
 
-  // Thêm hoặc sửa ghi chú
+  // Thêm hoặc sửa ghi chú theo từng thao tác đơn lẻ (Atomic Save)
   const handleSaveNote = async (data: {
     id?: string;
     title: string;
@@ -69,52 +113,114 @@ export default function HomeScreen() {
     category: NoteCategory;
     colorId: string;
     isPinned: boolean;
+    isLocked: boolean;
   }) => {
     const now = new Date().toISOString();
-    if (data.id) {
-      // Chỉnh sửa
-      const updated = notes.map((n) =>
-        n.id === data.id
-          ? {
-              ...n,
-              title: data.title,
-              content: data.content,
-              category: data.category,
-              colorId: data.colorId,
-              isPinned: data.isPinned,
-              updatedAt: now,
-            }
-          : n
-      );
-      await saveAndSyncNotes(updated);
+    const isUpdating = Boolean(data.id);
+    const targetId = data.id || `note-${Date.now()}-${Math.random().toString(36).substring(2, 6)}`;
+
+    const noteToSave: Note = {
+      id: targetId,
+      title: data.title,
+      content: data.content,
+      category: data.category,
+      colorId: data.colorId,
+      isPinned: data.isPinned,
+      isLocked: data.isLocked,
+      createdAt: isUpdating && editingNote ? editingNote.createdAt : now,
+      updatedAt: now,
+    };
+
+    // Cập nhật state UI ngay tức thì
+    if (isUpdating) {
+      setNotes((prev) => prev.map((n) => (n.id === targetId ? noteToSave : n)));
     } else {
-      // Thêm mới
-      const newNote: Note = {
-        id: `note-${Date.now()}-${Math.random().toString(36).substr(2, 5)}`,
-        title: data.title,
-        content: data.content,
-        category: data.category,
-        colorId: data.colorId,
-        isPinned: data.isPinned,
-        createdAt: now,
-        updatedAt: now,
-      };
-      await saveAndSyncNotes([newNote, ...notes]);
+      setNotes((prev) => [noteToSave, ...prev]);
+    }
+
+    // Lưu cục bộ và đồng bộ đơn lẻ lên server
+    const result = await NoteStorage.saveSingleNote(noteToSave);
+    const timeStr = formatCurrentTime();
+
+    if (result.synced) {
+      setSyncStatus('synced');
+      showToast(`Đã lưu lúc ${timeStr}`, 'success', 'Đã cập nhật trực tiếp vào MySQL.');
+    } else {
+      setSyncStatus('offline');
+      showToast(`Đã lưu cục bộ lúc ${timeStr}`, 'info', 'Đã lưu trên máy. Sẽ đồng bộ bù khi MySQL bật.');
     }
   };
 
-  // Xóa ghi chú
+  // Xóa ghi chú đơn lẻ
   const handleDeleteNote = async (id: string) => {
-    const filtered = notes.filter((n) => n.id !== id);
-    await saveAndSyncNotes(filtered);
+    // Cập nhật state UI
+    setNotes((prev) => prev.filter((n) => n.id !== id));
+
+    const result = await NoteStorage.deleteSingleNote(id);
+    if (result.synced) {
+      showToast('Đã xóa ghi chú thành công', 'success', 'Đã xóa khỏi MySQL.');
+    } else {
+      showToast('Đã xóa ghi chú khỏi máy', 'info', 'Sẽ xóa trên MySQL khi có kết nối.');
+    }
   };
 
   // Đổi trạng thái ghim
   const handleTogglePin = async (id: string) => {
-    const updated = notes.map((n) =>
-      n.id === id ? { ...n, isPinned: !n.isPinned, updatedAt: new Date().toISOString() } : n
+    const target = notes.find((n) => n.id === id);
+    if (!target) return;
+
+    const updated: Note = {
+      ...target,
+      isPinned: !target.isPinned,
+      updatedAt: new Date().toISOString(),
+    };
+
+    setNotes((prev) => prev.map((n) => (n.id === id ? updated : n)));
+    const result = await NoteStorage.saveSingleNote(updated);
+
+    showToast(
+      updated.isPinned ? '📌 Đã ghim ghi chú lên đầu' : 'Đã bỏ ghim ghi chú',
+      'info',
+      result.synced ? 'Đã đồng bộ MySQL' : 'Lưu cục bộ'
     );
-    await saveAndSyncNotes(updated);
+  };
+
+  // Yêu cầu mở khóa ghi chú bảo mật
+  const handleRequestUnlock = (note: Note, action: 'edit' | 'delete') => {
+    setPendingUnlockNote(note);
+    setPendingUnlockAction(action);
+    setPinModalVisible(true);
+  };
+
+  // Xác minh PIN thành công
+  const handlePinSuccess = () => {
+    if (!pendingUnlockNote) return;
+
+    if (pendingUnlockAction === 'edit') {
+      openEditModal(pendingUnlockNote);
+    } else if (pendingUnlockAction === 'delete') {
+      if (Platform.OS === 'web') {
+        if (window.confirm(`Xác nhận xóa ghi chú bảo mật "${pendingUnlockNote.title}"?`)) {
+          handleDeleteNote(pendingUnlockNote.id);
+        }
+      } else {
+        Alert.alert(
+          'Xác nhận xóa',
+          `Bạn có chắc chắn muốn xóa ghi chú "${pendingUnlockNote.title}" không?`,
+          [
+            { text: 'Hủy', style: 'cancel' },
+            {
+              text: 'Xóa',
+              style: 'destructive',
+              onPress: () => handleDeleteNote(pendingUnlockNote.id),
+            },
+          ]
+        );
+      }
+    }
+
+    setPendingUnlockNote(null);
+    setPendingUnlockAction(null);
   };
 
   // Lọc ghi chú theo tìm kiếm & thể loại
@@ -126,7 +232,7 @@ export default function HomeScreen() {
       const matchQuery =
         !query ||
         note.title.toLowerCase().includes(query) ||
-        note.content.toLowerCase().includes(query);
+        (!note.isLocked && note.content.toLowerCase().includes(query));
       return matchCategory && matchQuery;
     });
   }, [notes, selectedCategory, searchQuery]);
@@ -162,11 +268,11 @@ export default function HomeScreen() {
           onEdit={openEditModal}
           onDelete={handleDeleteNote}
           onTogglePin={handleTogglePin}
+          onRequestUnlock={handleRequestUnlock}
         />
       ));
     }
 
-    // Chia đều items vào các cột
     const columns: Note[][] = Array.from({ length: numColumns }, () => []);
     items.forEach((item, index) => {
       columns[index % numColumns].push(item);
@@ -183,6 +289,7 @@ export default function HomeScreen() {
                 onEdit={openEditModal}
                 onDelete={handleDeleteNote}
                 onTogglePin={handleTogglePin}
+                onRequestUnlock={handleRequestUnlock}
               />
             ))}
           </View>
@@ -211,9 +318,68 @@ export default function HomeScreen() {
                   <Ionicons name="document-text" size={22} color="#FFFFFF" />
                 </View>
                 <ThemedText style={styles.appName}>Ghi Chú</ThemedText>
+
+                {/* Huy hiệu chỉ báo trạng thái đồng bộ */}
+                <Pressable
+                  onPress={handleManualSync}
+                  hitSlop={6}
+                  style={({ pressed }) => [
+                    styles.syncBadge,
+                    syncStatus === 'synced'
+                      ? styles.syncBadgeOnline
+                      : syncStatus === 'syncing'
+                        ? styles.syncBadgeSyncing
+                        : styles.syncBadgeOffline,
+                    pressed && { opacity: 0.75 },
+                  ]}>
+                  <View
+                    style={[
+                      styles.syncDot,
+                      {
+                        backgroundColor:
+                          syncStatus === 'synced'
+                            ? '#10B981'
+                            : syncStatus === 'syncing'
+                              ? '#3B82F6'
+                              : '#F59E0B',
+                      },
+                    ]}
+                  />
+                  <ThemedText
+                    style={[
+                      styles.syncBadgeText,
+                      {
+                        color:
+                          syncStatus === 'synced'
+                            ? '#059669'
+                            : syncStatus === 'syncing'
+                              ? '#2563EB'
+                              : '#D97706',
+                      },
+                    ]}>
+                    {syncStatus === 'synced'
+                      ? 'Đã kết nối CSDL'
+                      : syncStatus === 'syncing'
+                        ? 'Đang kết nối...'
+                        : 'Ngoại tuyến (Offline)'}
+                  </ThemedText>
+                  <Ionicons
+                    name="refresh"
+                    size={11}
+                    color={
+                      syncStatus === 'synced'
+                        ? '#059669'
+                        : syncStatus === 'syncing'
+                          ? '#2563EB'
+                          : '#D97706'
+                    }
+                  />
+                </Pressable>
               </View>
+
               <ThemedText style={[styles.headerSubtitle, { color: colors.textSecondary }]}>
-                {notes.length} ghi chú • {notes.filter((n) => n.isPinned).length} đã ghim
+                {notes.length} ghi chú • {notes.filter((n) => n.isPinned).length} đã ghim •{' '}
+                {notes.filter((n) => n.isLocked).length} đã khóa
               </ThemedText>
             </View>
 
@@ -331,6 +497,22 @@ export default function HomeScreen() {
         onClose={() => setIsEditorVisible(false)}
         onSave={handleSaveNote}
       />
+
+      {/* Modal xác minh mã PIN */}
+      <PinModal
+        visible={pinModalVisible}
+        noteTitle={pendingUnlockNote?.title}
+        actionLabel={pendingUnlockAction === 'delete' ? 'xóa ghi chú bảo mật' : 'mở khóa ghi chú'}
+        onSuccess={handlePinSuccess}
+        onClose={() => {
+          setPinModalVisible(false);
+          setPendingUnlockNote(null);
+          setPendingUnlockAction(null);
+        }}
+      />
+
+      {/* Toast thông báo thời gian thực & trạng thái lưu */}
+      <ToastNotification toast={toast} onDismiss={() => setToast(null)} />
     </ThemedView>
   );
 }
@@ -363,6 +545,7 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     alignItems: 'center',
     gap: 10,
+    flexWrap: 'wrap',
   },
   logoIcon: {
     width: 38,
@@ -376,6 +559,37 @@ const styles = StyleSheet.create({
     fontSize: 24,
     fontWeight: '800',
     letterSpacing: -0.5,
+  },
+  syncBadge: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
+    paddingHorizontal: 8,
+    paddingVertical: 3.5,
+    borderRadius: 12,
+    borderWidth: 1,
+    marginLeft: 4,
+  },
+  syncBadgeOnline: {
+    backgroundColor: 'rgba(16, 185, 129, 0.12)',
+    borderColor: 'rgba(16, 185, 129, 0.3)',
+  },
+  syncBadgeOffline: {
+    backgroundColor: 'rgba(245, 158, 11, 0.12)',
+    borderColor: 'rgba(245, 158, 11, 0.3)',
+  },
+  syncBadgeSyncing: {
+    backgroundColor: 'rgba(59, 130, 246, 0.12)',
+    borderColor: 'rgba(59, 130, 246, 0.3)',
+  },
+  syncDot: {
+    width: 7,
+    height: 7,
+    borderRadius: 3.5,
+  },
+  syncBadgeText: {
+    fontSize: 11,
+    fontWeight: '700',
   },
   headerSubtitle: {
     fontSize: 13,

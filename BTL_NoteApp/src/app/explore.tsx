@@ -14,6 +14,7 @@ import { useFocusEffect } from 'expo-router';
 
 import { ThemedText } from '@/components/themed-text';
 import { ThemedView } from '@/components/themed-view';
+import { ToastConfig, ToastNotification } from '@/components/ui/ToastNotification';
 import { Colors, Spacing } from '@/constants/theme';
 import { NoteStorage } from '@/services/storage';
 import { Note, NoteCategory } from '@/types/note';
@@ -33,6 +34,7 @@ export default function StatisticsScreen() {
   const safeAreaInsets = useSafeAreaInsets();
 
   const [notes, setNotes] = useState<Note[]>([]);
+  const [toast, setToast] = useState<ToastConfig | null>(null);
 
   const loadData = async () => {
     const data = await NoteStorage.getNotes();
@@ -47,26 +49,32 @@ export default function StatisticsScreen() {
 
   const totalNotes = notes.length;
   const pinnedCount = notes.filter((n) => n.isPinned).length;
+  const lockedCount = notes.filter((n) => n.isLocked).length;
 
+  // Khôi phục ghi chú mẫu AN TOÀN — chỉ tác động bộ nhớ máy cục bộ, bảo vệ MySQL
   const handleResetSampleNotes = async () => {
     const action = async () => {
-      // Xóa storage và tải lại
-      if (Platform.OS === 'web' && typeof window !== 'undefined') {
-        window.localStorage.removeItem('@noteapp_notes_list_v1');
-      }
-      await NoteStorage.saveNotes([]);
-      const fresh = await NoteStorage.getNotes();
+      const fresh = await NoteStorage.resetLocalSampleNotes();
       setNotes(fresh);
+      setToast({
+        message: 'Đã khôi phục ghi chú mẫu thành công',
+        type: 'success',
+        subMessage: 'Dữ liệu chỉ được đặt lại trên thiết bị này, CSDL MySQL được giữ an toàn.',
+      });
     };
 
     if (Platform.OS === 'web') {
-      if (window.confirm('Khôi phục danh sách ghi chú mẫu ban đầu?')) {
+      if (
+        window.confirm(
+          'Khôi phục danh sách ghi chú mẫu trên máy này?\n(Lưu ý: Hành động này chỉ làm mới dữ liệu bộ nhớ máy, không làm mất dữ liệu trên máy chủ MySQL).'
+        )
+      ) {
         await action();
       }
     } else {
       Alert.alert(
         'Khôi phục dữ liệu mẫu',
-        'Hành động này sẽ tải lại các ghi chú mẫu ban đầu.',
+        'Hành động này sẽ tải lại danh sách mẫu trên thiết bị này. Dữ liệu trên MySQL không bị ảnh hưởng.',
         [
           { text: 'Hủy', style: 'cancel' },
           { text: 'Đồng ý', onPress: action },
@@ -95,8 +103,9 @@ export default function StatisticsScreen() {
             </ThemedText>
           </View>
 
-          {/* Hộp chỉ số tổng quát */}
+          {/* Hộp chỉ số tổng quát: 3 Thẻ thống kê */}
           <View style={styles.statCardsRow}>
+            {/* Tổng số ghi chú */}
             <ThemedView
               style={[
                 styles.statCard,
@@ -105,15 +114,16 @@ export default function StatisticsScreen() {
                   borderColor: isDark ? '#2B3850' : '#BFDBFE',
                 },
               ]}>
-              <Ionicons name="documents" size={26} color="#3B82F6" />
+              <Ionicons name="documents" size={24} color="#3B82F6" />
               <ThemedText style={[styles.statValue, { color: '#3B82F6' }]}>
                 {totalNotes}
               </ThemedText>
               <ThemedText style={[styles.statLabel, { color: colors.textSecondary }]}>
-                Tổng số ghi chú
+                Tổng ghi chú
               </ThemedText>
             </ThemedView>
 
+            {/* Đã ghim */}
             <ThemedView
               style={[
                 styles.statCard,
@@ -122,12 +132,30 @@ export default function StatisticsScreen() {
                   borderColor: isDark ? '#54461B' : '#FEF08A',
                 },
               ]}>
-              <Ionicons name="pin" size={26} color="#EAB308" />
+              <Ionicons name="pin" size={24} color="#EAB308" />
               <ThemedText style={[styles.statValue, { color: '#CA8A04' }]}>
                 {pinnedCount}
               </ThemedText>
               <ThemedText style={[styles.statLabel, { color: colors.textSecondary }]}>
-                Đã ghim ưu tiên
+                Đã ghim
+              </ThemedText>
+            </ThemedView>
+
+            {/* Đã khóa bảo mật */}
+            <ThemedView
+              style={[
+                styles.statCard,
+                {
+                  backgroundColor: isDark ? '#2A1B28' : '#FDF2F8',
+                  borderColor: isDark ? '#4A2A46' : '#FBCFE8',
+                },
+              ]}>
+              <Ionicons name="lock-closed" size={24} color="#EC4899" />
+              <ThemedText style={[styles.statValue, { color: '#DB2777' }]}>
+                {lockedCount}
+              </ThemedText>
+              <ThemedText style={[styles.statLabel, { color: colors.textSecondary }]}>
+                Đã khóa PIN
               </ThemedText>
             </ThemedView>
           </View>
@@ -186,6 +214,14 @@ export default function StatisticsScreen() {
                 },
               ]}>
               <View style={styles.tipItem}>
+                <Ionicons name="shield-checkmark" size={18} color="#EC4899" style={{ marginTop: 2 }} />
+                <ThemedText style={[styles.tipText, { color: colors.textSecondary }]}>
+                  <ThemedText style={[styles.tipBold, { color: '#EC4899' }]}>Khóa bảo mật: </ThemedText>
+                  Bật biểu tượng ổ khóa khi tạo ghi chú để yêu cầu nhập mã PIN (mặc định: 1234) khi xem.
+                </ThemedText>
+              </View>
+
+              <View style={styles.tipItem}>
                 <Ionicons name="sparkles" size={18} color="#EAB308" style={{ marginTop: 2 }} />
                 <ThemedText style={[styles.tipText, { color: colors.textSecondary }]}>
                   <ThemedText style={styles.tipBold}>Đổi màu sắc thẻ: </ThemedText>
@@ -198,14 +234,6 @@ export default function StatisticsScreen() {
                 <ThemedText style={[styles.tipText, { color: colors.textSecondary }]}>
                   <ThemedText style={styles.tipBold}>Ghim lên đầu: </ThemedText>
                   Bấm biểu tượng chiếc ghim để giữ ghi chú quan trọng luôn hiển thị ở trên cùng.
-                </ThemedText>
-              </View>
-
-              <View style={styles.tipItem}>
-                <Ionicons name="search" size={18} color="#10B981" style={{ marginTop: 2 }} />
-                <ThemedText style={[styles.tipText, { color: colors.textSecondary }]}>
-                  <ThemedText style={styles.tipBold}>Tìm kiếm linh hoạt: </ThemedText>
-                  Gõ từ khóa để lọc đồng thời cả tiêu đề lẫn nội dung bên trong ghi chú.
                 </ThemedText>
               </View>
             </ThemedView>
@@ -225,12 +253,18 @@ export default function StatisticsScreen() {
               ]}>
               <Ionicons name="refresh-outline" size={16} color={colors.textSecondary} />
               <ThemedText style={[styles.resetBtnText, { color: colors.textSecondary }]}>
-                Khôi phục ghi chú mẫu mặc định
+                Khôi phục ghi chú mẫu trên máy này
               </ThemedText>
             </Pressable>
+            <ThemedText style={[styles.resetHintText, { color: colors.textSecondary }]}>
+              🛡️ Chỉ làm mới bộ nhớ thiết bị, không xóa dữ liệu người dùng trên MySQL
+            </ThemedText>
           </View>
         </View>
       </ScrollView>
+
+      {/* Toast thông báo */}
+      <ToastNotification toast={toast} onDismiss={() => setToast(null)} />
     </ThemedView>
   );
 }
@@ -264,25 +298,26 @@ const styles = StyleSheet.create({
   },
   statCardsRow: {
     flexDirection: 'row',
-    gap: Spacing.three,
+    gap: Spacing.two,
     marginBottom: Spacing.five,
   },
   statCard: {
     flex: 1,
-    padding: Spacing.four,
+    padding: Spacing.three,
     borderRadius: 18,
     borderWidth: 1,
     alignItems: 'center',
-    gap: 4,
+    gap: 2,
   },
   statValue: {
-    fontSize: 32,
+    fontSize: 28,
     fontWeight: '800',
-    marginTop: 4,
+    marginTop: 2,
   },
   statLabel: {
-    fontSize: 13,
+    fontSize: 12,
     fontWeight: '600',
+    textAlign: 'center',
   },
   sectionWrapper: {
     marginBottom: Spacing.five,
@@ -356,6 +391,7 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     marginTop: Spacing.two,
     marginBottom: Spacing.four,
+    gap: 6,
   },
   resetBtn: {
     flexDirection: 'row',
@@ -369,5 +405,8 @@ const styles = StyleSheet.create({
   resetBtnText: {
     fontSize: 13,
     fontWeight: '600',
+  },
+  resetHintText: {
+    fontSize: 11.5,
   },
 });

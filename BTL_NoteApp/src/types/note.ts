@@ -74,6 +74,8 @@ export interface Note {
   category?: NoteCategory;
   colorId?: string;
   isPinned?: boolean;
+  isLocked?: boolean;
   createdAt: string;
   updatedAt?: string;
 }
+

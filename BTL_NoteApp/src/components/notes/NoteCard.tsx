@@ -17,6 +17,7 @@ interface NoteCardProps {
   onEdit: (note: Note) => void;
   onDelete: (id: string) => void;
   onTogglePin: (id: string) => void;
+  onRequestUnlock?: (note: Note, action: 'edit' | 'delete') => void;
 }
 
 function formatDate(isoString: string): string {
@@ -37,7 +38,13 @@ function formatDate(isoString: string): string {
   }
 }
 
-export function NoteCard({ note, onEdit, onDelete, onTogglePin }: NoteCardProps) {
+export function NoteCard({
+  note,
+  onEdit,
+  onDelete,
+  onTogglePin,
+  onRequestUnlock,
+}: NoteCardProps) {
   const scheme = useColorScheme();
   const isDark = scheme === 'dark';
   const colors = Colors[isDark ? 'dark' : 'light'];
@@ -48,7 +55,20 @@ export function NoteCard({ note, onEdit, onDelete, onTogglePin }: NoteCardProps)
   const bgColor = isDark ? colorConfig.bgDark : colorConfig.bgLight;
   const borderColor = isDark ? colorConfig.borderDark : colorConfig.borderLight;
 
+  const handleCardPress = () => {
+    if (note.isLocked && onRequestUnlock) {
+      onRequestUnlock(note, 'edit');
+    } else {
+      onEdit(note);
+    }
+  };
+
   const handleDelete = () => {
+    if (note.isLocked && onRequestUnlock) {
+      onRequestUnlock(note, 'delete');
+      return;
+    }
+
     if (Platform.OS === 'web') {
       const confirmed = window.confirm(
         `Bạn có chắc chắn muốn xóa ghi chú "${note.title || 'không tên'}" không?`
@@ -74,7 +94,7 @@ export function NoteCard({ note, onEdit, onDelete, onTogglePin }: NoteCardProps)
 
   return (
     <Pressable
-      onPress={() => onEdit(note)}
+      onPress={handleCardPress}
       style={({ pressed }) => [
         styles.card,
         {
@@ -83,20 +103,33 @@ export function NoteCard({ note, onEdit, onDelete, onTogglePin }: NoteCardProps)
         },
         pressed && styles.pressed,
       ]}>
-      {/* Header card: Danh mục & Ghim */}
+      {/* Header card: Danh mục & Huy hiệu Khóa & Ghim */}
       <View style={styles.cardHeader}>
-        <View
-          style={[
-            styles.categoryBadge,
-            { backgroundColor: isDark ? '#2E3440' : '#E2E8F0' },
-          ]}>
-          <ThemedText
+        <View style={styles.headerBadges}>
+          <View
             style={[
-              styles.categoryText,
-              { color: isDark ? '#E2E8F0' : '#334155' },
+              styles.categoryBadge,
+              { backgroundColor: isDark ? '#2E3440' : '#E2E8F0' },
             ]}>
-            {note.category}
-          </ThemedText>
+            <ThemedText
+              style={[
+                styles.categoryText,
+                { color: isDark ? '#E2E8F0' : '#334155' },
+              ]}>
+              {note.category}
+            </ThemedText>
+          </View>
+
+          {note.isLocked && (
+            <View
+              style={[
+                styles.lockBadge,
+                { backgroundColor: isDark ? 'rgba(59, 130, 246, 0.25)' : '#DBEAFE' },
+              ]}>
+              <Ionicons name="lock-closed" size={11} color="#3B82F6" />
+              <ThemedText style={styles.lockBadgeText}>ĐÃ KHÓA</ThemedText>
+            </View>
+          )}
         </View>
 
         <Pressable
@@ -125,15 +158,35 @@ export function NoteCard({ note, onEdit, onDelete, onTogglePin }: NoteCardProps)
         {note.title || 'Ghi chú không tên'}
       </ThemedText>
 
-      {/* Trích dẫn nội dung */}
-      <ThemedText
-        numberOfLines={4}
-        style={[
-          styles.content,
-          { color: isDark ? '#CBD5E1' : '#475569' },
-        ]}>
-        {note.content || '(Chưa có nội dung)'}
-      </ThemedText>
+      {/* Trích dẫn nội dung hoặc thông báo đã khóa */}
+      {note.isLocked ? (
+        <View
+          style={[
+            styles.lockedBox,
+            {
+              backgroundColor: isDark ? '#1F2937' : '#F1F5F9',
+              borderColor: isDark ? '#374151' : '#E2E8F0',
+            },
+          ]}>
+          <Ionicons name="lock-closed" size={16} color="#3B82F6" />
+          <ThemedText
+            style={[
+              styles.lockedText,
+              { color: isDark ? '#93C5FD' : '#2563EB' },
+            ]}>
+            Nội dung đã được khóa. Bấm để mở.
+          </ThemedText>
+        </View>
+      ) : (
+        <ThemedText
+          numberOfLines={4}
+          style={[
+            styles.content,
+            { color: isDark ? '#CBD5E1' : '#475569' },
+          ]}>
+          {note.content || '(Chưa có nội dung)'}
+        </ThemedText>
+      )}
 
       {/* Footer: Thời gian và thao tác */}
       <View style={styles.cardFooter}>
@@ -149,11 +202,15 @@ export function NoteCard({ note, onEdit, onDelete, onTogglePin }: NoteCardProps)
           <Pressable
             onPress={(e) => {
               e.stopPropagation();
-              onEdit(note);
+              handleCardPress();
             }}
             hitSlop={8}
             style={styles.actionBtn}>
-            <Ionicons name="pencil-outline" size={17} color={colors.textSecondary} />
+            <Ionicons
+              name={note.isLocked ? 'key-outline' : 'pencil-outline'}
+              size={17}
+              color={note.isLocked ? '#3B82F6' : colors.textSecondary}
+            />
           </Pressable>
 
           <Pressable
@@ -177,7 +234,6 @@ const styles = StyleSheet.create({
     padding: Spacing.four,
     borderWidth: 1.5,
     marginBottom: Spacing.three,
-    // Hiệu ứng bóng nhẹ
     ...Platform.select({
       web: {
         boxShadow: '0 4px 12px rgba(0, 0, 0, 0.05)',
@@ -203,6 +259,11 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     marginBottom: Spacing.two,
   },
+  headerBadges: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
+  },
   categoryBadge: {
     paddingHorizontal: 10,
     paddingVertical: 3,
@@ -212,6 +273,20 @@ const styles = StyleSheet.create({
     fontSize: 11,
     fontWeight: '700',
     textTransform: 'uppercase',
+    letterSpacing: 0.5,
+  },
+  lockBadge: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 4,
+    paddingHorizontal: 8,
+    paddingVertical: 3,
+    borderRadius: 12,
+  },
+  lockBadgeText: {
+    fontSize: 10,
+    fontWeight: '800',
+    color: '#3B82F6',
     letterSpacing: 0.5,
   },
   pinBtn: {
@@ -227,6 +302,20 @@ const styles = StyleSheet.create({
     fontSize: 14,
     lineHeight: 20,
     marginBottom: Spacing.three,
+  },
+  lockedBox: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+    paddingHorizontal: 12,
+    paddingVertical: 10,
+    borderRadius: 10,
+    borderWidth: 1,
+    marginBottom: Spacing.three,
+  },
+  lockedText: {
+    fontSize: 13,
+    fontWeight: '600',
   },
   cardFooter: {
     flexDirection: 'row',
