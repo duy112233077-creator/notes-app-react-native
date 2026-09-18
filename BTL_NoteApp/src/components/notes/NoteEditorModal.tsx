@@ -1,5 +1,5 @@
 import { Ionicons } from '@expo/vector-icons';
-import React, { useEffect, useState } from 'react';
+import React, { useCallback, useEffect, useState } from 'react';
 import {
   KeyboardAvoidingView,
   Modal,
@@ -10,6 +10,7 @@ import {
   TextInput,
   TouchableOpacity,
   View,
+  Image,
   useColorScheme,
   useWindowDimensions,
   ActivityIndicator,
@@ -20,8 +21,11 @@ import { ThemedText } from '@/components/themed-text';
 import { ThemedView } from '@/components/themed-view';
 import { PinModal } from '@/components/notes/PinModal';
 import { MediaPickerModal } from '@/components/MediaPickerModal';
+import { VoiceToTextModal } from '@/components/VoiceToTextModal';
+import { AttachmentViewerModal } from '@/components/AttachmentViewerModal';
+import { ReminderPickerModal } from '@/components/ReminderPickerModal';
 import { Colors, Spacing } from '@/constants/theme';
-import { NOTE_COLORS, Note, NoteCategory, MediaAttachment } from '@/types/note';
+import { NOTE_COLORS, Note, NoteCategory, MediaAttachment, DEFAULT_CATEGORIES } from '@/types/note';
 import { NoteStorage } from '@/services/storage';
 import { AIService } from '@/services/aiService';
 import { ExportService } from '@/services/exportService';
@@ -45,13 +49,7 @@ interface NoteEditorModalProps {
   }) => void;
 }
 
-const CATEGORIES: NoteCategory[] = [
-  'Công việc',
-  'Học tập',
-  'Cá nhân',
-  'Ý tưởng',
-  'Khác',
-];
+// Categories are loaded dynamically from storage including custom ones
 
 export function NoteEditorModal({
   visible,
@@ -78,8 +76,24 @@ export function NoteEditorModal({
 
   const [pinModalVisible, setPinModalVisible] = useState(false);
   const [mediaModalVisible, setMediaModalVisible] = useState(false);
+  const [voiceToTextVisible, setVoiceToTextVisible] = useState(false);
+  const [reminderPickerVisible, setReminderPickerVisible] = useState(false);
+  const [viewerAttachment, setViewerAttachment] = useState<MediaAttachment | null>(null);
   const [aiLoading, setAiLoading] = useState(false);
   const [summaryText, setSummaryText] = useState<string | null>(null);
+  const [isFullscreen, setIsFullscreen] = useState(false);
+  const [allCategories, setAllCategories] = useState<NoteCategory[]>(DEFAULT_CATEGORIES);
+  const [newCatInput, setNewCatInput] = useState('');
+  const [showAddCat, setShowAddCat] = useState(false);
+
+  // Load custom categories
+  useEffect(() => {
+    NoteStorage.getCustomCategories().then((customs) => {
+      const merged = [...DEFAULT_CATEGORIES];
+      customs.forEach((c) => { if (!merged.includes(c)) merged.push(c); });
+      setAllCategories(merged);
+    });
+  }, [visible]);
 
   useEffect(() => {
     if (noteToEdit) {
@@ -121,33 +135,31 @@ export function NoteEditorModal({
   };
 
   // Nhắc nhở & Thông báo
-  const handleScheduleReminder = async () => {
-    if (Platform.OS === 'web') {
-      const input = window.prompt(
-        'Nhập thời gian nhắc nhở (Định dạng: YYYY-MM-DD HH:mm, ví dụ: 2026-09-20 09:00)',
-        new Date(Date.now() + 3600000 * 24).toISOString().slice(0, 16).replace('T', ' ')
-      );
-      if (input) {
-        const d = new Date(input);
-        if (isNaN(d.getTime())) {
-          alert('Thời gian không hợp lệ.');
-          return;
-        }
-        setReminderAt(d.toISOString());
-        alert(`Đã đặt nhắc nhở vào: ${d.toLocaleString('vi-VN')}`);
-      }
-    } else {
-      // Đặt nhắc nhở sau 1 giờ mặc định hoặc thời gian tùy chỉnh
-      const date = new Date(Date.now() + 3600000 * 2);
-      setReminderAt(date.toISOString());
+  const handleScheduleReminder = () => {
+    setReminderPickerVisible(true);
+  };
+
+  const handleConfirmReminder = async (isoString: string) => {
+    setReminderAt(isoString);
+    const dateObj = new Date(isoString);
+    if (Platform.OS !== 'web') {
       await NotificationService.scheduleNoteReminder(
         noteToEdit?.id || 'temp',
         title || 'Ghi chú',
         content || 'Nhắc nhở ghi chú',
-        date
+        dateObj
       );
-      Alert.alert('Đã hẹn giờ', `Thông báo sẽ gửi vào ${date.toLocaleString('vi-VN')}`);
     }
+  };
+
+  const handleAddCustomCategory = async () => {
+    const clean = newCatInput.trim();
+    if (!clean) return;
+    const updated = await NoteStorage.addCustomCategory(clean);
+    setAllCategories(updated);
+    setCategory(clean);
+    setNewCatInput('');
+    setShowAddCat(false);
   };
 
   // AI Summarize
@@ -232,13 +244,14 @@ export function NoteEditorModal({
       onRequestClose={onClose}>
       <KeyboardAvoidingView
         behavior={Platform.OS === 'ios' ? 'padding' : undefined}
-        style={styles.backdrop}>
-        <Pressable style={styles.backdropPressable} onPress={onClose} />
+        style={[styles.backdrop, isFullscreen && styles.backdropFullscreen]}>
+        {!isFullscreen && <Pressable style={styles.backdropPressable} onPress={onClose} />}
 
         <ThemedView
           style={[
             styles.modalBox,
             isDesktop ? styles.modalDesktop : styles.modalMobile,
+            isFullscreen && styles.modalBoxFullscreen,
             {
               backgroundColor: isDark ? '#1E222A' : '#FFFFFF',
               borderColor: isDark ? '#2E3440' : '#E2E8F0',
@@ -251,6 +264,18 @@ export function NoteEditorModal({
             </ThemedText>
 
             <View style={styles.headerRightActions}>
+              {/* Fullscreen toggle */}
+              <Pressable
+                onPress={() => setIsFullscreen((f) => !f)}
+                style={styles.iconToggleBtn}
+                hitSlop={8}>
+                <Ionicons
+                  name={isFullscreen ? 'contract-outline' : 'expand-outline'}
+                  size={19}
+                  color={colors.textSecondary}
+                />
+              </Pressable>
+
               <Pressable
                 onPress={handleToggleLock}
                 style={[
@@ -300,7 +325,7 @@ export function NoteEditorModal({
               <ThemedText style={styles.errorText}>{errorMsg}</ThemedText>
             )}
 
-            {/* Quick Toolbar: Attachments, Reminders, AI, Export */}
+            {/* Quick Toolbar: Attachments, Voice, Reminders, AI, Export */}
             <View style={styles.toolbar}>
               <TouchableOpacity
                 style={styles.toolBtn}
@@ -309,6 +334,13 @@ export function NoteEditorModal({
                 <ThemedText style={styles.toolText}>
                   {attachments.length > 0 ? `Đính kèm (${attachments.length})` : 'Đính kèm tệp'}
                 </ThemedText>
+              </TouchableOpacity>
+
+              <TouchableOpacity
+                style={styles.toolBtn}
+                onPress={() => setVoiceToTextVisible(true)}>
+                <Ionicons name="mic-outline" size={18} color="#0891B2" />
+                <ThemedText style={styles.toolText}>Giọng nói → Chữ</ThemedText>
               </TouchableOpacity>
 
               <TouchableOpacity style={styles.toolBtn} onPress={handleScheduleReminder}>
@@ -373,10 +405,46 @@ export function NoteEditorModal({
               }}
             />
 
+            {/* Attachment Thumbnail Strip */}
+            {attachments.length > 0 && (
+              <View style={styles.attachStripWrap}>
+                <ThemedText style={styles.label}>Tệp đính kèm</ThemedText>
+                <ScrollView horizontal showsHorizontalScrollIndicator={false} style={styles.attachStrip}>
+                  {attachments.map((att) => (
+                    <TouchableOpacity
+                      key={att.id}
+                      style={styles.attachThumb}
+                      onPress={() => setViewerAttachment(att)}>
+                      {att.type === 'image' ? (
+                        <Image source={{ uri: att.uri }} style={styles.thumbImg} resizeMode="cover" />
+                      ) : att.type === 'video' ? (
+                        <View style={[styles.thumbImg, styles.thumbVideo]}>
+                          <Ionicons name="videocam" size={22} color="#FFFFFF" />
+                        </View>
+                      ) : att.type === 'audio' ? (
+                        <View style={[styles.thumbImg, styles.thumbAudio]}>
+                          <Ionicons name="musical-notes" size={22} color="#FFFFFF" />
+                        </View>
+                      ) : (
+                        <View style={[styles.thumbImg, styles.thumbFile]}>
+                          <Ionicons name="document-text" size={22} color="#FFFFFF" />
+                        </View>
+                      )}
+                      <TouchableOpacity
+                        style={styles.thumbRemove}
+                        onPress={() => setAttachments((prev) => prev.filter((a) => a.id !== att.id))}>
+                        <Ionicons name="close-circle" size={16} color="#EF4444" />
+                      </TouchableOpacity>
+                    </TouchableOpacity>
+                  ))}
+                </ScrollView>
+              </View>
+            )}
+
             {/* Select Danh mục */}
             <ThemedText style={styles.label}>Danh mục</ThemedText>
             <View style={styles.categoryWrap}>
-              {CATEGORIES.map((cat) => {
+              {allCategories.map((cat) => {
                 const isSelected = category === cat;
                 return (
                   <Pressable
@@ -463,6 +531,7 @@ export function NoteEditorModal({
             <TextInput
               style={[
                 styles.contentInput,
+                isFullscreen && styles.contentInputFullscreen,
                 {
                   color: colors.text,
                   backgroundColor: isDark ? '#14171E' : '#F8FAFC',
@@ -472,7 +541,7 @@ export function NoteEditorModal({
               placeholder="Viết nội dung ghi chú tại đây..."
               placeholderTextColor={colors.textSecondary}
               multiline
-              numberOfLines={6}
+              numberOfLines={isFullscreen ? 20 : 6}
               textAlignVertical="top"
               value={content}
               onChangeText={(t) => {
@@ -562,6 +631,37 @@ export function NoteEditorModal({
         onAddAttachment={(item) => setAttachments((prev) => [...prev, item])}
         onRemoveAttachment={(id) => setAttachments((prev) => prev.filter((a) => a.id !== id))}
       />
+
+      {/* VoiceToTextModal */}
+      <VoiceToTextModal
+        visible={voiceToTextVisible}
+        onClose={() => setVoiceToTextVisible(false)}
+        onTextReady={(text) => {
+          setContent((prev) => (prev ? prev + '\n' + text : text));
+          setVoiceToTextVisible(false);
+        }}
+      />
+
+      {/* AttachmentViewerModal */}
+      {viewerAttachment && (
+        <AttachmentViewerModal
+          visible={!!viewerAttachment}
+          attachment={viewerAttachment}
+          onClose={() => setViewerAttachment(null)}
+        />
+      )}
+
+      {/* ReminderPickerModal */}
+      <ReminderPickerModal
+        visible={reminderPickerVisible}
+        initialDate={reminderAt}
+        onClose={() => setReminderPickerVisible(false)}
+        onConfirm={handleConfirmReminder}
+        onClear={() => {
+          setReminderAt(undefined);
+          setReminderPickerVisible(false);
+        }}
+      />
     </Modal>
   );
 }
@@ -581,12 +681,22 @@ const styles = StyleSheet.create({
     right: 0,
     bottom: 0,
   },
+  backdropFullscreen: {
+    padding: 0,
+  },
   modalBox: {
     width: '100%',
     borderRadius: 20,
     borderWidth: 1,
     overflow: 'hidden',
     maxHeight: '90%',
+  },
+  modalBoxFullscreen: {
+    maxHeight: '100%',
+    height: '100%',
+    borderRadius: 0,
+    borderWidth: 0,
+    maxWidth: '100%',
   },
   modalDesktop: {
     maxWidth: 620,
@@ -761,6 +871,72 @@ const styles = StyleSheet.create({
     lineHeight: 22,
     minHeight: 120,
     marginBottom: 14,
+  },
+  contentInputFullscreen: {
+    minHeight: 300,
+    flex: 1,
+  },
+  attachStripWrap: {
+    marginBottom: 12,
+  },
+  attachStrip: {
+    flexDirection: 'row',
+  },
+  attachThumb: {
+    width: 72,
+    height: 72,
+    borderRadius: 10,
+    marginRight: 8,
+    position: 'relative',
+  },
+  thumbImg: {
+    width: 72,
+    height: 72,
+    borderRadius: 10,
+    backgroundColor: '#94A3B8',
+  },
+  thumbVideo: {
+    backgroundColor: '#1D4ED8',
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+  thumbAudio: {
+    backgroundColor: '#0E7490',
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+  thumbFile: {
+    backgroundColor: '#475569',
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+  thumbRemove: {
+    position: 'absolute',
+    top: -4,
+    right: -4,
+    backgroundColor: '#FFFFFF',
+    borderRadius: 10,
+  },
+  addCatRow: {
+    flexDirection: 'row',
+    gap: 8,
+    marginBottom: 12,
+    marginTop: -4,
+  },
+  addCatInput: {
+    flex: 1,
+    borderRadius: 10,
+    borderWidth: 1,
+    paddingHorizontal: 12,
+    paddingVertical: 8,
+    fontSize: 13,
+  },
+  addCatBtn: {
+    backgroundColor: '#2563EB',
+    borderRadius: 10,
+    paddingHorizontal: 14,
+    justifyContent: 'center',
+    alignItems: 'center',
   },
   exportRow: {
     flexDirection: 'row',

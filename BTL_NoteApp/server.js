@@ -85,7 +85,7 @@ async function initDatabase() {
         \`user_id\` VARCHAR(100) DEFAULT NULL,
         \`title\` VARCHAR(255) NOT NULL,
         \`content\` TEXT,
-        \`category\` VARCHAR(50) DEFAULT 'Khác',
+        \`category\` VARCHAR(100) DEFAULT 'Khác',
         \`color_id\` VARCHAR(30) DEFAULT 'yellow',
         \`is_pinned\` TINYINT(1) DEFAULT 0,
         \`is_locked\` TINYINT(1) DEFAULT 0,
@@ -93,13 +93,33 @@ async function initDatabase() {
         \`reminder_at\` VARCHAR(50) DEFAULT NULL,
         \`share_code\` VARCHAR(100) DEFAULT NULL,
         \`collaborators\` LONGTEXT DEFAULT NULL,
+        \`last_modified_by\` LONGTEXT DEFAULT NULL,
+        \`edit_history\` LONGTEXT DEFAULT NULL,
+        \`is_deleted\` TINYINT(1) DEFAULT 0,
+        \`deleted_at\` VARCHAR(50) DEFAULT NULL,
         \`created_at\` VARCHAR(50),
         \`updated_at\` VARCHAR(50)
       ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
     `;
     await pool.query(createNotesTableQuery);
 
-    // 5. Run Migrations an toàn bổ sung cột mới cho DB cũ
+    // 5. Tạo bảng activity_logs (Theo dõi lịch sử thêm/sửa/xóa của các tài khoản)
+    const createActivityLogsTableQuery = `
+      CREATE TABLE IF NOT EXISTS \`activity_logs\` (
+        \`id\` VARCHAR(100) PRIMARY KEY,
+        \`user_id\` VARCHAR(100) DEFAULT NULL,
+        \`user_name\` VARCHAR(150) NOT NULL,
+        \`user_email\` VARCHAR(191) DEFAULT NULL,
+        \`action\` VARCHAR(50) NOT NULL,
+        \`note_id\` VARCHAR(100) DEFAULT NULL,
+        \`note_title\` VARCHAR(255) DEFAULT NULL,
+        \`details\` TEXT DEFAULT NULL,
+        \`created_at\` VARCHAR(50) NOT NULL
+      ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+    `;
+    await pool.query(createActivityLogsTableQuery);
+
+    // 6. Run Migrations an toàn bổ sung cột mới cho DB cũ
     const safeAddColumn = async (colName, colDef) => {
       try {
         await pool.query(`ALTER TABLE \`notes\` ADD COLUMN \`${colName}\` ${colDef};`);
@@ -115,6 +135,10 @@ async function initDatabase() {
     await safeAddColumn('reminder_at', 'VARCHAR(50) DEFAULT NULL');
     await safeAddColumn('share_code', 'VARCHAR(100) DEFAULT NULL');
     await safeAddColumn('collaborators', 'LONGTEXT DEFAULT NULL');
+    await safeAddColumn('last_modified_by', 'LONGTEXT DEFAULT NULL');
+    await safeAddColumn('edit_history', 'LONGTEXT DEFAULT NULL');
+    await safeAddColumn('is_deleted', 'TINYINT(1) DEFAULT 0');
+    await safeAddColumn('deleted_at', 'VARCHAR(50) DEFAULT NULL');
 
     console.log(`✅ [MySQL] Kết nối thành công tới CSDL "${DB_NAME}" trên XAMPP!`);
   } catch (error) {
@@ -155,6 +179,14 @@ app.post('/api/auth/register', async (req, res) => {
 
     const userObj = { id: userId, name: name.trim(), email: cleanEmail, createdAt };
     const token = jwt.sign(userObj, JWT_SECRET, { expiresIn: '30d' });
+
+    // Ghi nhật ký đăng ký
+    if (pool) {
+      await pool.query(
+        'INSERT INTO `activity_logs` (`id`, `user_id`, `user_name`, `user_email`, `action`, `details`, `created_at`) VALUES (?, ?, ?, ?, ?, ?, ?)',
+        ['log-' + Date.now(), userId, name.trim(), cleanEmail, 'THÊM', 'Đã đăng ký tài khoản mới', createdAt]
+      );
+    }
 
     res.json({
       success: true,
@@ -209,6 +241,51 @@ app.get('/api/auth/me', requireAuth, (req, res) => {
 });
 
 // ----------------------------------------------------
+// ACTIVITY LOGS API
+// ----------------------------------------------------
+app.get('/api/activities', async (req, res) => {
+  try {
+    if (!pool) return res.status(503).json({ error: 'CSDL chưa sẵn sàng.' });
+    const [rows] = await pool.query('SELECT * FROM `activity_logs` ORDER BY `created_at` DESC LIMIT 100');
+    const logs = rows.map((r) => ({
+      id: r.id,
+      userId: r.user_id,
+      userName: r.user_name,
+      userEmail: r.user_email,
+      action: r.action,
+      noteId: r.note_id,
+      noteTitle: r.note_title,
+      details: r.details,
+      createdAt: r.created_at,
+    }));
+    res.json(logs);
+  } catch (err) {
+    res.status(500).json({ error: 'Lỗi khi tải nhật ký thao tác: ' + err.message });
+  }
+});
+
+app.post('/api/activities', authenticateToken, async (req, res) => {
+  try {
+    if (!pool) return res.status(503).json({ error: 'CSDL chưa sẵn sàng.' });
+    const { action, noteId, noteTitle, details, userName, userEmail } = req.body;
+    const userId = req.user ? req.user.id : null;
+    const finalUserName = req.user ? req.user.name : userName || 'Khách Vô Danh';
+    const finalUserEmail = req.user ? req.user.email : userEmail || '';
+    const now = new Date().toISOString();
+    const id = 'log-' + Date.now() + '-' + Math.floor(Math.random() * 1000);
+
+    await pool.query(
+      'INSERT INTO `activity_logs` (`id`, `user_id`, `user_name`, `user_email`, `action`, `note_id`, `note_title`, `details`, `created_at`) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)',
+      [id, userId, finalUserName, finalUserEmail, action || 'THAO TÁC', noteId || null, noteTitle || null, details || '', now]
+    );
+
+    res.json({ success: true, id });
+  } catch (err) {
+    res.status(500).json({ error: 'Lỗi ghi nhật ký: ' + err.message });
+  }
+});
+
+// ----------------------------------------------------
 // NOTES API
 // ----------------------------------------------------
 
@@ -216,11 +293,19 @@ app.get('/api/auth/me', requireAuth, (req, res) => {
 function parseNoteRecord(r) {
   let attachments = [];
   let collaborators = [];
+  let lastModifiedBy = undefined;
+  let editHistory = [];
   try {
     if (r.attachments) attachments = JSON.parse(r.attachments);
   } catch (e) {}
   try {
     if (r.collaborators) collaborators = JSON.parse(r.collaborators);
+  } catch (e) {}
+  try {
+    if (r.last_modified_by) lastModifiedBy = JSON.parse(r.last_modified_by);
+  } catch (e) {}
+  try {
+    if (r.edit_history) editHistory = JSON.parse(r.edit_history);
   } catch (e) {}
 
   return {
@@ -236,6 +321,10 @@ function parseNoteRecord(r) {
     reminderAt: r.reminder_at || undefined,
     shareCode: r.share_code || undefined,
     collaborators,
+    lastModifiedBy,
+    editHistory,
+    isDeleted: Boolean(r.is_deleted),
+    deletedAt: r.deleted_at || undefined,
     createdAt: r.created_at,
     updatedAt: r.updated_at,
   };
@@ -253,7 +342,7 @@ app.get('/api/notes', authenticateToken, async (req, res) => {
 
     if (req.user) {
       // Đã đăng nhập -> Lấy ghi chú sở hữu + ghi chú công khai + ghi chú được hợp tác chia sẻ
-      query += 'WHERE `user_id` = ? OR `user_id` IS NULL OR `collaborators` LIKE ? ';
+      query += 'WHERE (`user_id` = ? OR `user_id` IS NULL OR `collaborators` LIKE ?) ';
       params.push(req.user.id, `%${req.user.email}%`);
     } else {
       // Khách chưa đăng nhập -> Lấy ghi chú vô danh (guest/public)
@@ -302,6 +391,10 @@ app.post('/api/notes', authenticateToken, async (req, res) => {
       reminderAt,
       shareCode,
       collaborators,
+      lastModifiedBy,
+      editHistory,
+      isDeleted,
+      deletedAt,
       createdAt,
       updatedAt,
     } = req.body;
@@ -314,17 +407,40 @@ app.post('/api/notes', authenticateToken, async (req, res) => {
     }
 
     const currentUserId = req.user ? req.user.id : userId || null;
+    const currentUserName = req.user ? req.user.name : (lastModifiedBy ? lastModifiedBy.userName : 'Khách Vô Danh');
+    const currentUserEmail = req.user ? req.user.email : (lastModifiedBy ? lastModifiedBy.userEmail : '');
+
     const attachmentsJson = Array.isArray(attachments) ? JSON.stringify(attachments) : null;
     const collaboratorsJson = Array.isArray(collaborators) ? JSON.stringify(collaborators) : null;
+    const lastModifiedByJson = lastModifiedBy ? JSON.stringify(lastModifiedBy) : JSON.stringify({
+      userId: currentUserId || 'guest',
+      userName: currentUserName,
+      userEmail: currentUserEmail,
+      at: new Date().toISOString(),
+    });
+
+    let finalEditHistory = Array.isArray(editHistory) ? editHistory : [];
+    const newHistoryItem = {
+      userId: currentUserId || 'guest',
+      userName: currentUserName,
+      userEmail: currentUserEmail,
+      action: isDeleted ? 'XÓA' : 'CẬP NHẬT',
+      at: new Date().toISOString(),
+    };
+    if (finalEditHistory.length === 0 || finalEditHistory[finalEditHistory.length - 1].at !== newHistoryItem.at) {
+      finalEditHistory = [...finalEditHistory.slice(-19), newHistoryItem];
+    }
+    const editHistoryJson = JSON.stringify(finalEditHistory);
     const now = new Date().toISOString();
 
     const query = `
       INSERT INTO \`notes\` (
         \`id\`, \`user_id\`, \`title\`, \`content\`, \`category\`, \`color_id\`, 
         \`is_pinned\`, \`is_locked\`, \`attachments\`, \`reminder_at\`, \`share_code\`, 
-        \`collaborators\`, \`created_at\`, \`updated_at\`
+        \`collaborators\`, \`last_modified_by\`, \`edit_history\`, \`is_deleted\`, \`deleted_at\`,
+        \`created_at\`, \`updated_at\`
       )
-      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
       ON DUPLICATE KEY UPDATE
         \`user_id\` = COALESCE(VALUES(\`user_id\`), \`user_id\`),
         \`title\` = VALUES(\`title\`),
@@ -337,6 +453,10 @@ app.post('/api/notes', authenticateToken, async (req, res) => {
         \`reminder_at\` = VALUES(\`reminder_at\`),
         \`share_code\` = VALUES(\`share_code\`),
         \`collaborators\` = VALUES(\`collaborators\`),
+        \`last_modified_by\` = VALUES(\`last_modified_by\`),
+        \`edit_history\` = VALUES(\`edit_history\`),
+        \`is_deleted\` = VALUES(\`is_deleted\`),
+        \`deleted_at\` = VALUES(\`deleted_at\`),
         \`updated_at\` = VALUES(\`updated_at\`);
     `;
 
@@ -353,9 +473,20 @@ app.post('/api/notes', authenticateToken, async (req, res) => {
       reminderAt || null,
       shareCode || null,
       collaboratorsJson,
+      lastModifiedByJson,
+      editHistoryJson,
+      isDeleted ? 1 : 0,
+      deletedAt || null,
       createdAt || now,
       updatedAt || now,
     ]);
+
+    // Ghi nhật ký thao tác
+    const actionType = isDeleted ? 'XÓA' : 'THÊM/SỬA';
+    await pool.query(
+      'INSERT INTO `activity_logs` (`id`, `user_id`, `user_name`, `user_email`, `action`, `note_id`, `note_title`, `details`, `created_at`) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)',
+      ['log-' + Date.now() + '-' + Math.floor(Math.random() * 1000), currentUserId, currentUserName, currentUserEmail, actionType, id, title.trim(), `Tài khoản ${currentUserName} đã lưu ghi chú "${title.trim()}"`, now]
+    );
 
     res.json({
       success: true,
@@ -384,6 +515,10 @@ app.put('/api/notes/:id', authenticateToken, async (req, res) => {
       reminderAt,
       shareCode,
       collaborators,
+      lastModifiedBy,
+      editHistory,
+      isDeleted,
+      deletedAt,
       updatedAt,
     } = req.body;
 
@@ -391,8 +526,19 @@ app.put('/api/notes/:id', authenticateToken, async (req, res) => {
       return res.status(400).json({ error: 'Tiêu đề ghi chú không được để trống.' });
     }
 
+    const currentUserId = req.user ? req.user.id : 'guest';
+    const currentUserName = req.user ? req.user.name : (lastModifiedBy ? lastModifiedBy.userName : 'Khách Vô Danh');
+    const currentUserEmail = req.user ? req.user.email : (lastModifiedBy ? lastModifiedBy.userEmail : '');
+
     const attachmentsJson = Array.isArray(attachments) ? JSON.stringify(attachments) : null;
     const collaboratorsJson = Array.isArray(collaborators) ? JSON.stringify(collaborators) : null;
+    const lastModifiedByJson = JSON.stringify({
+      userId: currentUserId,
+      userName: currentUserName,
+      userEmail: currentUserEmail,
+      at: new Date().toISOString(),
+    });
+    const editHistoryJson = Array.isArray(editHistory) ? JSON.stringify(editHistory) : null;
     const now = updatedAt || new Date().toISOString();
 
     const [result] = await pool.query(
@@ -407,6 +553,10 @@ app.put('/api/notes/:id', authenticateToken, async (req, res) => {
         \`reminder_at\` = ?,
         \`share_code\` = ?,
         \`collaborators\` = ?,
+        \`last_modified_by\` = ?,
+        \`edit_history\` = ?,
+        \`is_deleted\` = ?,
+        \`deleted_at\` = ?,
         \`updated_at\` = ?
       WHERE \`id\` = ?`,
       [
@@ -420,6 +570,10 @@ app.put('/api/notes/:id', authenticateToken, async (req, res) => {
         reminderAt || null,
         shareCode || null,
         collaboratorsJson,
+        lastModifiedByJson,
+        editHistoryJson,
+        isDeleted ? 1 : 0,
+        deletedAt || null,
         now,
         id,
       ]
@@ -428,6 +582,12 @@ app.put('/api/notes/:id', authenticateToken, async (req, res) => {
     if (result.affectedRows === 0) {
       return res.status(404).json({ error: `Không tìm thấy ghi chú mã ${id}.` });
     }
+
+    // Ghi nhật ký thao tác SỬA
+    await pool.query(
+      'INSERT INTO `activity_logs` (`id`, `user_id`, `user_name`, `user_email`, `action`, `note_id`, `note_title`, `details`, `created_at`) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)',
+      ['log-' + Date.now() + '-' + Math.floor(Math.random() * 1000), currentUserId, currentUserName, currentUserEmail, 'SỬA', id, title.trim(), `Tài khoản ${currentUserName} đã chỉnh sửa ghi chú "${title.trim()}"`, now]
+    );
 
     res.json({ success: true, message: `Đã cập nhật ghi chú ${id} thành công!` });
   } catch (err) {
@@ -453,8 +613,19 @@ app.post('/api/notes/:id/share', authenticateToken, async (req, res) => {
       [shareCode, collaboratorsJson, id]
     );
 
-    const [rows] = await pool.query('SELECT `share_code` FROM `notes` WHERE `id` = ?', [id]);
+    const [rows] = await pool.query('SELECT `share_code`, `title` FROM `notes` WHERE `id` = ?', [id]);
     const finalShareCode = rows[0] ? rows[0].share_code : shareCode;
+    const noteTitle = rows[0] ? rows[0].title : 'Ghi chú';
+
+    const currentUserId = req.user ? req.user.id : 'guest';
+    const currentUserName = req.user ? req.user.name : 'Khách Vô Danh';
+    const currentUserEmail = req.user ? req.user.email : '';
+    const now = new Date().toISOString();
+
+    await pool.query(
+      'INSERT INTO `activity_logs` (`id`, `user_id`, `user_name`, `user_email`, `action`, `note_id`, `note_title`, `details`, `created_at`) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)',
+      ['log-' + Date.now() + '-' + Math.floor(Math.random() * 1000), currentUserId, currentUserName, currentUserEmail, 'CHIA SẺ', id, noteTitle, `Tài khoản ${currentUserName} đã chia sẻ ghi chú cho: ${(collaboratorEmails || []).join(', ')}`, now]
+    );
 
     res.json({
       success: true,
@@ -471,7 +642,21 @@ app.delete('/api/notes/:id', authenticateToken, async (req, res) => {
   try {
     if (!pool) return res.status(503).json({ error: 'CSDL MySQL chưa sẵn sàng.' });
     const { id } = req.params;
+
+    const [rows] = await pool.query('SELECT `title` FROM `notes` WHERE `id` = ?', [id]);
+    const noteTitle = rows[0] ? rows[0].title : id;
+
     const [result] = await pool.query('DELETE FROM `notes` WHERE `id` = ?', [id]);
+
+    const currentUserId = req.user ? req.user.id : 'guest';
+    const currentUserName = req.user ? req.user.name : 'Khách Vô Danh';
+    const currentUserEmail = req.user ? req.user.email : '';
+    const now = new Date().toISOString();
+
+    await pool.query(
+      'INSERT INTO `activity_logs` (`id`, `user_id`, `user_name`, `user_email`, `action`, `note_id`, `note_title`, `details`, `created_at`) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)',
+      ['log-' + Date.now() + '-' + Math.floor(Math.random() * 1000), currentUserId, currentUserName, currentUserEmail, 'XÓA', id, noteTitle, `Tài khoản ${currentUserName} đã xóa ghi chú "${noteTitle}"`, now]
+    );
 
     res.json({
       success: true,

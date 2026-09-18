@@ -142,6 +142,13 @@ export function NoteCard({
             </View>
           )}
 
+          {note.collaborators && note.collaborators.length > 0 && (
+            <View style={styles.shareBadge}>
+              <Ionicons name="people" size={11} color="#2563EB" />
+              <ThemedText style={styles.shareBadgeText}>{note.collaborators.length}</ThemedText>
+            </View>
+          )}
+
           {note.attachments && note.attachments.length > 0 && (
             <View style={styles.mediaBadge}>
               <Ionicons name="attach" size={12} color="#2563EB" />
@@ -355,6 +362,20 @@ const styles = StyleSheet.create({
     borderRadius: 12,
   },
   mediaBadgeText: {
+    fontSize: 10,
+    fontWeight: '700',
+    color: '#2563EB',
+  },
+  shareBadge: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 2,
+    backgroundColor: '#EFF6FF',
+    paddingHorizontal: 7,
+    paddingVertical: 3,
+    borderRadius: 12,
+  },
+  shareBadgeText: {
     fontSize: 10,
     fontWeight: '700',
     color: '#2563EB',

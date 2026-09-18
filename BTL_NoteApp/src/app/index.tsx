@@ -21,12 +21,14 @@ import { PinModal } from '@/components/notes/PinModal';
 import { SearchBar } from '@/components/notes/SearchBar';
 import { AuthModal } from '@/components/AuthModal';
 import { ShareModal } from '@/components/ShareModal';
+import { ReminderAlertModal } from '@/components/ReminderAlertModal';
 import { ThemedText } from '@/components/themed-text';
 import { ThemedView } from '@/components/themed-view';
 import { ToastConfig, ToastNotification, ToastType } from '@/components/ui/ToastNotification';
 import { Colors, Spacing } from '@/constants/theme';
 import { NoteStorage } from '@/services/storage';
 import { AuthService } from '@/services/authService';
+import { NotificationService } from '@/services/notificationService';
 import { Note, NoteCategory, User, AuthSession, MediaAttachment } from '@/types/note';
 
 export default function HomeScreen() {
@@ -64,6 +66,10 @@ export default function HomeScreen() {
   const [isEditorVisible, setIsEditorVisible] = useState(false);
   const [editingNote, setEditingNote] = useState<Note | null>(null);
 
+  // Real-time Reminder State
+  const [reminderAlertNote, setReminderAlertNote] = useState<Note | null>(null);
+  const [notifiedReminderIds] = useState(() => new Set<string>());
+
   // Modal PIN bảo mật
   const [pinModalVisible, setPinModalVisible] = useState(false);
   const [pendingUnlockNote, setPendingUnlockNote] = useState<Note | null>(null);
@@ -82,6 +88,31 @@ export default function HomeScreen() {
   useEffect(() => {
     initApp();
   }, []);
+
+  // Real-time reminder interval checker (runs every 4 seconds)
+  useEffect(() => {
+    const checkReminders = () => {
+      if (notes.length === 0) return;
+      const nowMs = Date.now();
+      for (const n of notes) {
+        if (n.reminderAt && !notifiedReminderIds.has(n.id)) {
+          const remTime = new Date(n.reminderAt).getTime();
+          if (!isNaN(remTime) && remTime <= nowMs) {
+            notifiedReminderIds.add(n.id);
+            setReminderAlertNote(n);
+            NotificationService.triggerInstantNotification(
+              `⏰ Nhắc nhở ghi chú: ${n.title}`,
+              n.content || 'Đã đến giờ hẹn ghi chú của bạn!'
+            );
+            break;
+          }
+        }
+      }
+    };
+    checkReminders();
+    const interval = setInterval(checkReminders, 4000);
+    return () => clearInterval(interval);
+  }, [notes, notifiedReminderIds]);
 
   const initApp = async () => {
     const session = await AuthService.getStoredSession();
@@ -102,8 +133,67 @@ export default function HomeScreen() {
       setSyncStatus('offline');
     }
 
-    const data = await NoteStorage.getNotes();
-    setNotes(data);
+    const session = await AuthService.getStoredSession();
+    const user = session ? session.user : null;
+
+    let allNotes = await NoteStorage.getNotes();
+
+    // 1. Chuyển tất cả ghi chú hiện tại chưa có owner thành tài khoản 'duy'
+    let migrated = false;
+    allNotes = allNotes.map((n) => {
+      const isSample = ['note-1', 'note-2', 'note-3', 'note-4'].includes(n.id) || n.userId === 'sample';
+      if (!isSample && !n.userId) {
+        migrated = true;
+        return { ...n, userId: 'duy' };
+      }
+      return n;
+    });
+
+    if (migrated) {
+      await NoteStorage.saveToLocalCache(allNotes);
+    }
+
+    // 2. Lọc ghi chú theo phân quyền tài khoản & chia sẻ
+    let userNotes: Note[] = [];
+
+    if (user) {
+      const uId = user.id.toLowerCase();
+      const uEmail = user.email.toLowerCase();
+      const uName = user.name.toLowerCase();
+      const isDuyAccount = uName.includes('duy') || uEmail.includes('duy') || uId === 'duy';
+
+      userNotes = allNotes.filter((n) => {
+        // Ghi chú mẫu dùng chung cho tất cả
+        const isSample = ['note-1', 'note-2', 'note-3', 'note-4'].includes(n.id) || n.userId === 'sample';
+        if (isSample) return true;
+
+        // Ghi chú thuộc sở hữu của tài khoản này
+        const nOwner = (n.userId || '').toLowerCase();
+        const isOwner =
+          nOwner === uId ||
+          nOwner === uEmail ||
+          nOwner === uName ||
+          (isDuyAccount && (nOwner === 'duy' || !nOwner));
+
+        if (isOwner) return true;
+
+        // Ghi chú được người khác chia sẻ đích danh cho tài khoản này
+        const isCollaborator = n.collaborators?.some(
+          (c) => c.toLowerCase() === uEmail || c.toLowerCase() === uName || c.toLowerCase() === uId
+        );
+
+        return Boolean(isCollaborator);
+      });
+    } else {
+      // Chế độ chưa đăng nhập (Khách / Duy)
+      userNotes = allNotes.filter((n) => {
+        const isSample = ['note-1', 'note-2', 'note-3', 'note-4'].includes(n.id) || n.userId === 'sample';
+        const isDuyOrGuest = !n.userId || n.userId === 'duy' || n.userId === 'guest';
+        return isSample || isDuyOrGuest;
+      });
+    }
+
+    setNotes(userNotes);
     setLoading(false);
   };
 
@@ -158,7 +248,9 @@ export default function HomeScreen() {
 
     const noteToSave: Note = {
       id: targetId,
-      userId: currentUser ? currentUser.id : undefined,
+      userId: isUpdating && editingNote?.userId ? editingNote.userId : (currentUser ? currentUser.id : 'duy'),
+      collaborators: isUpdating && editingNote ? editingNote.collaborators : [],
+      shareCode: isUpdating && editingNote ? editingNote.shareCode : undefined,
       title: data.title,
       content: data.content,
       category: data.category,
@@ -181,6 +273,13 @@ export default function HomeScreen() {
     const result = await NoteStorage.saveSingleNote(noteToSave);
     const timeStr = formatCurrentTime();
 
+    await NoteStorage.logActivity(
+      isUpdating ? 'SỬA' : 'THÊM',
+      targetId,
+      data.title,
+      isUpdating ? `Đã cập nhật ghi chú "${data.title}"` : `Đã tạo ghi chú mới "${data.title}"`
+    );
+
     if (result.synced) {
       setSyncStatus('synced');
       showToast(`Đã lưu lúc ${timeStr}`, 'success', 'Đã cập nhật trực tiếp vào MySQL.');
@@ -192,8 +291,15 @@ export default function HomeScreen() {
 
   // Xóa ghi chú
   const handleDeleteNote = async (id: string) => {
+    const noteToDelete = notes.find((n) => n.id === id);
     setNotes((prev) => prev.filter((n) => n.id !== id));
     const result = await NoteStorage.deleteSingleNote(id);
+    await NoteStorage.logActivity(
+      'XÓA',
+      id,
+      noteToDelete?.title || 'Ghi chú',
+      `Đã xóa ghi chú "${noteToDelete?.title || id}"`
+    );
     if (result.synced) {
       showToast('Đã xóa ghi chú', 'success', 'Đã xóa khỏi MySQL.');
     } else {
@@ -228,7 +334,7 @@ export default function HomeScreen() {
     setShareModalVisible(true);
   };
 
-  const handleUpdateNoteShare = (shareCode: string, collaborators: string[]) => {
+  const handleUpdateNoteShare = async (shareCode: string, collaborators: string[]) => {
     if (!selectedShareNote) return;
     const updated: Note = {
       ...selectedShareNote,
@@ -236,7 +342,13 @@ export default function HomeScreen() {
       collaborators,
     };
     setNotes((prev) => prev.map((n) => (n.id === updated.id ? updated : n)));
-    NoteStorage.saveSingleNote(updated);
+    await NoteStorage.saveSingleNote(updated);
+    await NoteStorage.logActivity(
+      'CHIA SẺ',
+      updated.id,
+      updated.title,
+      `Đã chia sẻ ghi chú với ${collaborators.length} thành viên (Mã: ${shareCode})`
+    );
   };
 
   // Unlock handlers
@@ -573,6 +685,16 @@ export default function HomeScreen() {
         note={selectedShareNote}
         onClose={() => setShareModalVisible(false)}
         onUpdateNoteShare={handleUpdateNoteShare}
+      />
+
+      <ReminderAlertModal
+        visible={!!reminderAlertNote}
+        note={reminderAlertNote}
+        onClose={() => setReminderAlertNote(null)}
+        onOpenNote={(note) => {
+          setEditingNote(note);
+          setIsEditorVisible(true);
+        }}
       />
 
       <ToastNotification toast={toast} onDismiss={() => setToast(null)} />

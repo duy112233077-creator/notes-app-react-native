@@ -1,13 +1,15 @@
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { Platform } from 'react-native';
-import { Note } from '@/types/note';
+import { Note, ActivityLog, DEFAULT_CATEGORIES } from '@/types/note';
 import { API_BASE_URL } from '@/constants/config';
 import { AuthService } from '@/services/authService';
-
 
 const STORAGE_KEY = '@noteapp_notes_list_v1';
 const PENDING_QUEUE_KEY = '@noteapp_pending_actions_v1';
 const USER_PIN_KEY = '@noteapp_user_security_pin_v1';
+const CUSTOM_CATEGORIES_KEY = '@noteapp_custom_categories_v1';
+const ACTIVITY_LOGS_KEY = '@noteapp_activity_logs_v1';
+const TRASH_KEY = '@noteapp_trash_notes_v1';
 
 export type PendingAction =
   | { type: 'SAVE'; note: Note; timestamp: number }
@@ -65,7 +67,7 @@ export const INITIAL_NOTES: Note[] = [
 ];
 
 export const NoteStorage = {
-  // Lấy toàn bộ danh sách ghi chú — merge local + server thông minh theo updatedAt
+  // Lấy toàn bộ danh sách ghi chú (không bao gồm các ghi chú đã chuyển vào Thùng rác)
   async getNotes(): Promise<Note[]> {
     const localNotes = await this.loadFromLocalCache();
 
@@ -81,59 +83,32 @@ export const NoteStorage = {
       clearTimeout(timeoutId);
 
       if (response.ok) {
-        // 1. Đẩy hàng đợi offline (thao tác tạo/sửa/xóa khi mất mạng) lên server trước
         const hasPending = await this.hasPendingActions();
         if (hasPending) {
           await this.syncPendingQueue();
         }
 
         const serverNotes: Note[] = await response.json();
+        if (!Array.isArray(serverNotes)) return localNotes.filter((n) => !n.isDeleted);
 
-        if (!Array.isArray(serverNotes)) return localNotes;
-
-        // 2. Trường hợp server trống nhưng local có dữ liệu → đẩy toàn bộ local lên server
-        if (serverNotes.length === 0 && localNotes.length > 0) {
-          for (const note of localNotes) {
-            try {
-              await fetch(`${API_BASE_URL}/notes`, {
-                method: 'POST',
-                headers,
-                body: JSON.stringify(note),
-              });
-            } catch { /* bỏ qua lỗi từng note */ }
-          }
-          return localNotes;
-        }
-
-        // 3. Merge thông minh: ưu tiên bản có updatedAt mới hơn
         const serverMap = new Map<string, Note>(serverNotes.map((n) => [n.id, n]));
         const localMap  = new Map<string, Note>(localNotes.map((n) => [n.id, n]));
         const mergedMap = new Map<string, Note>();
 
-        // Thêm toàn bộ từ server
         for (const [id, sNote] of serverMap) {
           const lNote = localMap.get(id);
           if (!lNote) {
             mergedMap.set(id, sNote);
           } else {
-            // Có ở cả 2 nơi → lấy bản mới hơn theo updatedAt
             const sTime = new Date(sNote.updatedAt || 0).getTime();
             const lTime = new Date(lNote.updatedAt || 0).getTime();
             mergedMap.set(id, lTime > sTime ? lNote : sNote);
           }
         }
 
-        // Ghi chú chỉ có local (tạo offline chưa sync) → POST lên server
         for (const [id, lNote] of localMap) {
           if (!serverMap.has(id)) {
             mergedMap.set(id, lNote);
-            try {
-              await fetch(`${API_BASE_URL}/notes`, {
-                method: 'POST',
-                headers,
-                body: JSON.stringify(lNote),
-              });
-            } catch { /* ghi vào queue sau */ }
           }
         }
 
@@ -141,20 +116,18 @@ export const NoteStorage = {
           (a, b) => new Date(b.updatedAt || 0).getTime() - new Date(a.updatedAt || 0).getTime(),
         );
 
-        // 4. Cập nhật cache local với kết quả merge
         await this.saveToLocalCache(merged);
-        return merged;
+        return merged.filter((n) => !n.isDeleted);
       }
     } catch (apiErr) {
-      // Server MySQL chưa bật hoặc lỗi mạng: dùng dữ liệu bộ nhớ máy
+      // Offline fallback
     }
 
-    return localNotes;
+    return localNotes.filter((n) => !n.isDeleted);
   },
 
-  // Lưu 1 ghi chú (Tạo mới hoặc Sửa) theo từng thao tác đơn lẻ (Atomic Save)
+  // Lưu 1 ghi chú (Tạo mới hoặc Sửa)
   async saveSingleNote(note: Note): Promise<{ success: boolean; synced: boolean }> {
-    // 1. Cập nhật ngay vào bộ nhớ máy để đảm bảo không mất dữ liệu
     const currentNotes = await this.loadFromLocalCache();
     const existingIndex = currentNotes.findIndex((n) => n.id === note.id);
     let updatedNotes: Note[];
@@ -166,7 +139,14 @@ export const NoteStorage = {
     }
     await this.saveToLocalCache(updatedNotes);
 
-    // 2. Thử gửi POST lên API
+    // Ghi nhận vết hoạt động
+    await this.logActivity(
+      existingIndex >= 0 ? 'SỬA' : 'THÊM',
+      note.id,
+      note.title,
+      `Ghi chú "${note.title}" (${note.category || 'Khác'}) đã được lưu`
+    );
+
     try {
       const controller = new AbortController();
       const timeoutId = setTimeout(() => controller.abort(), 3000);
@@ -184,22 +164,64 @@ export const NoteStorage = {
         return { success: true, synced: true };
       }
     } catch {
-      // API lỗi hoặc offline
+      // API offline
     }
 
-    // Nếu không kết nối được server, đưa vào hàng đợi chờ đồng bộ bù
     await this.enqueuePendingAction({ type: 'SAVE', note, timestamp: Date.now() });
     return { success: true, synced: false };
   },
 
-  // Xóa 1 ghi chú theo ID đơn lẻ (Atomic Delete)
+  // Chuyển ghi chú vào Thùng Rác (Soft Delete)
+  async softDeleteNote(id: string): Promise<void> {
+    const notes = await this.loadFromLocalCache();
+    const target = notes.find((n) => n.id === id);
+    if (!target) return;
+
+    const updated: Note = {
+      ...target,
+      isDeleted: true,
+      deletedAt: new Date().toISOString(),
+      updatedAt: new Date().toISOString(),
+    };
+
+    await this.saveSingleNote(updated);
+    await this.logActivity('XÓA', id, target.title, `Ghi chú "${target.title}" đã được chuyển vào Thùng rác`);
+  },
+
+  // Khôi phục ghi chú từ Thùng Rác (Restore)
+  async restoreNote(id: string): Promise<void> {
+    const notes = await this.loadFromLocalCache();
+    const target = notes.find((n) => n.id === id);
+    if (!target) return;
+
+    const updated: Note = {
+      ...target,
+      isDeleted: false,
+      deletedAt: undefined,
+      updatedAt: new Date().toISOString(),
+    };
+
+    await this.saveSingleNote(updated);
+    await this.logActivity('KHÔI PHỤC', id, target.title, `Ghi chú "${target.title}" đã được khôi phục từ Thùng rác`);
+  },
+
+  // Lấy danh sách ghi chú trong Thùng Rác
+  async getTrashNotes(): Promise<Note[]> {
+    const notes = await this.loadFromLocalCache();
+    return notes.filter((n) => n.isDeleted);
+  },
+
+  // Xóa vĩnh viễn ghi chú đơn lẻ (Atomic Delete)
   async deleteSingleNote(id: string): Promise<{ success: boolean; synced: boolean }> {
-    // 1. Xóa khỏi bộ nhớ máy cục bộ
     const currentNotes = await this.loadFromLocalCache();
+    const target = currentNotes.find((n) => n.id === id);
     const filtered = currentNotes.filter((n) => n.id !== id);
     await this.saveToLocalCache(filtered);
 
-    // 2. Thử gọi API DELETE
+    if (target) {
+      await this.logActivity('XÓA', id, target.title, `Đã xóa vĩnh viễn ghi chú "${target.title}"`);
+    }
+
     try {
       const controller = new AbortController();
       const timeoutId = setTimeout(() => controller.abort(), 3000);
@@ -216,30 +238,35 @@ export const NoteStorage = {
         return { success: true, synced: true };
       }
     } catch {
-      // API lỗi hoặc offline
+      // Offline
     }
 
-    // Thêm vào hàng đợi chờ đồng bộ bù
     await this.enqueuePendingAction({ type: 'DELETE', id, timestamp: Date.now() });
     return { success: true, synced: false };
   },
 
+  // Xóa sạch thùng rác
+  async emptyTrash(): Promise<void> {
+    const trash = await this.getTrashNotes();
+    for (const note of trash) {
+      await this.deleteSingleNote(note.id);
+    }
+  },
 
-  // Lưu tương thích ngược cho danh sách mảng (gọi saveNotes)
+  // Save batch
   async saveNotes(notes: Note[]): Promise<void> {
     await this.saveToLocalCache(notes);
     await this.batchSync(notes);
   },
 
-  // KHÔI PHỤC GHI CHÚ MẪU CHỈ TRÊN THIẾT BỊ NÀY (Tuyệt đối không xóa MySQL)
+  // Reset sample notes
   async resetLocalSampleNotes(): Promise<Note[]> {
     await this.saveToLocalCache(INITIAL_NOTES);
-    // Xóa hàng đợi pending để tránh đẩy dữ liệu rác
     await this.clearPendingActions();
     return INITIAL_NOTES;
   },
 
-  // Đồng bộ hàng loạt an toàn
+  // Batch Sync
   async batchSync(notes: Note[]): Promise<boolean> {
     try {
       const controller = new AbortController();
@@ -258,7 +285,7 @@ export const NoteStorage = {
     }
   },
 
-  // Kiểm tra sức khỏe server & MySQL
+  // Check health
   async checkServerHealth(): Promise<{ online: boolean; dbReady: boolean }> {
     try {
       const controller = new AbortController();
@@ -277,7 +304,7 @@ export const NoteStorage = {
     }
   },
 
-  // Đồng bộ bù hàng đợi pending actions
+  // Pending queue sync
   async syncPendingQueue(): Promise<void> {
     const queue = await this.getPendingActions();
     if (queue.length === 0) return;
@@ -307,10 +334,8 @@ export const NoteStorage = {
     await this.savePendingActions(remainingActions);
   },
 
-  // Quản lý hàng đợi thao tác chờ đồng bộ
   async enqueuePendingAction(action: PendingAction): Promise<void> {
     const queue = await this.getPendingActions();
-    // Loại bỏ action trùng lặp id nếu có để tối ưu
     const filtered = queue.filter((a) => {
       if (a.type === 'DELETE' && action.type === 'DELETE' && a.id === action.id) return false;
       if (a.type === 'SAVE' && action.type === 'SAVE' && a.note.id === action.note.id) return false;
@@ -346,16 +371,14 @@ export const NoteStorage = {
         window.localStorage.setItem(PENDING_QUEUE_KEY, json);
       }
       await AsyncStorage.setItem(PENDING_QUEUE_KEY, json);
-    } catch {
-      // Bỏ qua lỗi cache
-    }
+    } catch {}
   },
 
   async clearPendingActions(): Promise<void> {
     await this.savePendingActions([]);
   },
 
-  // Bộ nhớ đệm cục bộ (Local Cache)
+  // Cache Local
   async saveToLocalCache(notes: Note[]): Promise<void> {
     try {
       const json = JSON.stringify(notes);
@@ -390,9 +413,205 @@ export const NoteStorage = {
     }
   },
 
-  // --- Quản lý mã PIN bảo mật do người dùng tự đặt ---
+  // --- Quản lý Danh mục tùy chỉnh (Custom Categories) ---
+  async getCustomCategories(): Promise<string[]> {
+    try {
+      let raw: string | null = null;
+      if (Platform.OS === 'web' && typeof window !== 'undefined' && window.localStorage) {
+        raw = window.localStorage.getItem(CUSTOM_CATEGORIES_KEY);
+      } else {
+        raw = await AsyncStorage.getItem(CUSTOM_CATEGORIES_KEY);
+      }
+      const list: string[] = raw ? JSON.parse(raw) : [];
+      return list;
+    } catch {
+      return [];
+    }
+  },
 
-  // Kiểm tra người dùng đã đặt PIN chưa
+  async addCustomCategory(catName: string): Promise<string[]> {
+    const clean = catName.trim();
+    if (!clean) return await this.getCustomCategories();
+    const existing = await this.getCustomCategories();
+    if (!existing.includes(clean)) {
+      const updated = [...existing, clean];
+      const json = JSON.stringify(updated);
+      if (Platform.OS === 'web' && typeof window !== 'undefined' && window.localStorage) {
+        window.localStorage.setItem(CUSTOM_CATEGORIES_KEY, json);
+      }
+      await AsyncStorage.setItem(CUSTOM_CATEGORIES_KEY, json);
+      return updated;
+    }
+    return existing;
+  },
+
+  // --- Quản lý Nhật ký Thao tác (Activity Logs) ---
+  async getActivityLogs(): Promise<ActivityLog[]> {
+    try {
+      const headers = await AuthService.getAuthHeaders();
+      const res = await fetch(`${API_BASE_URL}/activities`, { headers });
+      if (res.ok) {
+        const data = await res.json();
+        if (Array.isArray(data)) {
+          await this.saveLocalActivityLogs(data);
+          return data;
+        }
+      }
+    } catch {
+      // Offline fallback
+    }
+    return await this.loadLocalActivityLogs();
+  },
+
+  async logActivity(
+    action: ActivityLog['action'],
+    noteId?: string,
+    noteTitle?: string,
+    details?: string
+  ): Promise<void> {
+    const session = await AuthService.getStoredSession();
+    const userName = session ? session.user.name : 'Khách Vô Danh';
+    const userEmail = session ? session.user.email : '';
+    const userId = session ? session.user.id : undefined;
+    const now = new Date().toISOString();
+
+    const newLog: ActivityLog = {
+      id: 'log-' + Date.now() + '-' + Math.floor(Math.random() * 1000),
+      userId,
+      userName,
+      userEmail,
+      action,
+      noteId,
+      noteTitle,
+      details: details || `Thao tác ${action} trên ghi chú ${noteTitle || ''}`,
+      createdAt: now,
+    };
+
+    const localLogs = await this.loadLocalActivityLogs();
+    const updated = [newLog, ...localLogs.slice(0, 99)];
+    await this.saveLocalActivityLogs(updated);
+
+    try {
+      const headers = await AuthService.getAuthHeaders();
+      await fetch(`${API_BASE_URL}/activities`, {
+        method: 'POST',
+        headers,
+        body: JSON.stringify(newLog),
+      });
+    } catch {
+      // API Offline
+    }
+  },
+
+  async loadLocalActivityLogs(): Promise<ActivityLog[]> {
+    try {
+      let json: string | null = null;
+      if (Platform.OS === 'web' && typeof window !== 'undefined' && window.localStorage) {
+        json = window.localStorage.getItem(ACTIVITY_LOGS_KEY);
+      } else {
+        json = await AsyncStorage.getItem(ACTIVITY_LOGS_KEY);
+      }
+      return json ? JSON.parse(json) : [];
+    } catch {
+      return [];
+    }
+  },
+
+  async saveLocalActivityLogs(logs: ActivityLog[]): Promise<void> {
+    try {
+      const json = JSON.stringify(logs);
+      if (Platform.OS === 'web' && typeof window !== 'undefined' && window.localStorage) {
+        window.localStorage.setItem(ACTIVITY_LOGS_KEY, json);
+      }
+      await AsyncStorage.setItem(ACTIVITY_LOGS_KEY, json);
+    } catch {}
+  },
+
+  // --- Tính năng Sao Lưu & Khôi Phục Dữ Liệu (Backup & Restore JSON) ---
+  async exportBackupJSON(): Promise<string> {
+    const allNotes = await this.loadFromLocalCache();
+    const customCategories = await this.getCustomCategories();
+    const activityLogs = await this.loadLocalActivityLogs();
+
+    const backupObj = {
+      version: '1.0',
+      exportedAt: new Date().toISOString(),
+      appName: 'BTL NoteApp React Native',
+      notesCount: allNotes.length,
+      notes: allNotes,
+      customCategories,
+      activityLogs,
+    };
+
+    await this.logActivity('SAO LƯU', undefined, undefined, 'Đã xuất tệp sao lưu dữ liệu toàn bộ ứng dụng');
+    return JSON.stringify(backupObj, null, 2);
+  },
+
+  async importBackupJSON(jsonStr: string): Promise<{ success: boolean; notesImported: number; message: string }> {
+    try {
+      const parsed = JSON.parse(jsonStr);
+      if (!parsed || !Array.isArray(parsed.notes)) {
+        return { success: false, notesImported: 0, message: 'Định dạng tệp sao lưu không hợp lệ.' };
+      }
+
+      const importedNotes: Note[] = parsed.notes;
+      await this.saveToLocalCache(importedNotes);
+
+      if (Array.isArray(parsed.customCategories)) {
+        for (const cat of parsed.customCategories) {
+          await this.addCustomCategory(cat);
+        }
+      }
+
+      // Đẩy tất cả ghi chú lên server MySQL nếu online
+      await this.batchSync(importedNotes);
+      await this.logActivity('KHÔI PHỤC', undefined, undefined, `Đã khôi phục ${importedNotes.length} ghi chú từ tệp sao lưu JSON`);
+
+      return {
+        success: true,
+        notesImported: importedNotes.length,
+        message: `Đã khôi phục thành công ${importedNotes.length} ghi chú từ tệp sao lưu!`,
+      };
+    } catch (err: any) {
+      return { success: false, notesImported: 0, message: 'Lỗi khi khôi phục: ' + err.message };
+    }
+  },
+
+  // --- Backup & Restore helpers ---
+  async backupNotes(): Promise<{ success: boolean; message: string }> {
+    try {
+      const json = await this.exportBackupJSON();
+      // On web, trigger download
+      if (Platform.OS === 'web' && typeof document !== 'undefined') {
+        const blob = new Blob([json], { type: 'application/json' });
+        const url = URL.createObjectURL(blob);
+        const a = document.createElement('a');
+        a.href = url;
+        a.download = `noteapp_backup_${Date.now()}.json`;
+        a.click();
+        URL.revokeObjectURL(url);
+      }
+      // Store to AsyncStorage as latest backup
+      await AsyncStorage.setItem('@noteapp_backup_json_v1', json);
+      return { success: true, message: 'Tệp sao lưu đã được tạo thành công.' };
+    } catch (err: any) {
+      return { success: false, message: err.message || 'Lỗi khi tạo sao lưu.' };
+    }
+  },
+
+  async restoreNotes(): Promise<{ success: boolean; notesImported: number; message: string }> {
+    try {
+      const json = await AsyncStorage.getItem('@noteapp_backup_json_v1');
+      if (!json) {
+        return { success: false, notesImported: 0, message: 'Không tìm thấy tệp sao lưu. Hãy tạo sao lưu trước.' };
+      }
+      return this.importBackupJSON(json);
+    } catch (err: any) {
+      return { success: false, notesImported: 0, message: err.message || 'Lỗi khi khôi phục.' };
+    }
+  },
+
+  // --- Quản lý mã PIN ---
   async hasUserPin(): Promise<boolean> {
     try {
       let val: string | null = null;
@@ -407,7 +626,6 @@ export const NoteStorage = {
     }
   },
 
-  // Lấy mã PIN đã lưu (null nếu chưa có)
   async getUserPin(): Promise<string | null> {
     try {
       let val: string | null = null;
@@ -422,7 +640,6 @@ export const NoteStorage = {
     }
   },
 
-  // Lưu mã PIN người dùng đặt
   async setUserPin(pin: string): Promise<void> {
     try {
       if (Platform.OS === 'web' && typeof window !== 'undefined' && window.localStorage) {
@@ -434,3 +651,4 @@ export const NoteStorage = {
     }
   },
 };
+

@@ -1,4 +1,12 @@
-export type NoteCategory = 'Công việc' | 'Học tập' | 'Cá nhân' | 'Ý tưởng' | 'Khác';
+export type NoteCategory = string;
+
+export const DEFAULT_CATEGORIES: NoteCategory[] = [
+  'Công việc',
+  'Học tập',
+  'Cá nhân',
+  'Ý tưởng',
+  'Khác',
+];
 
 export interface NoteColorOption {
   id: string;
@@ -69,11 +77,11 @@ export const NOTE_COLORS: NoteColorOption[] = [
 
 export interface MediaAttachment {
   id: string;
-  type: 'image' | 'audio' | 'pdf' | 'file';
+  type: 'image' | 'video' | 'audio' | 'pdf' | 'file';
   uri: string;
   name: string;
   size?: number;
-  duration?: number; // for audio recordings in seconds
+  duration?: number; // cho audio hoặc video (tính bằng giây)
 }
 
 export interface User {
@@ -86,6 +94,14 @@ export interface User {
 export interface AuthSession {
   user: User;
   token: string;
+}
+
+export interface CollaboratorEdit {
+  userId: string;
+  userName: string;
+  userEmail: string;
+  action: string;
+  at: string;
 }
 
 export interface Note {
@@ -102,8 +118,30 @@ export interface Note {
   shareCode?: string;
   collaborators?: string[];
   tags?: string[];
+  lastModifiedBy?: {
+    userId: string;
+    userName: string;
+    userEmail: string;
+    at: string;
+  };
+  editHistory?: CollaboratorEdit[];
+  isDeleted?: boolean;
+  deletedAt?: string;
   createdAt: string;
   updatedAt?: string;
 }
+
+export interface ActivityLog {
+  id: string;
+  userId?: string;
+  userName: string;
+  userEmail?: string;
+  action: 'THÊM' | 'SỬA' | 'XÓA' | 'KHÔI PHỤC' | 'CHIA SẺ' | 'SAO LƯU';
+  noteId?: string;
+  noteTitle?: string;
+  details?: string;
+  createdAt: string;
+}
+
 
 

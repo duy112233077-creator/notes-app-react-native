@@ -12,6 +12,7 @@ interface MediaPickerModalProps {
   onClose: () => void;
   onAddAttachment: (attachment: MediaAttachment) => void;
   onRemoveAttachment: (id: string) => void;
+  onOpenVoiceToText?: () => void;
 }
 
 export const MediaPickerModal: React.FC<MediaPickerModalProps> = ({
@@ -20,13 +21,14 @@ export const MediaPickerModal: React.FC<MediaPickerModalProps> = ({
   onClose,
   onAddAttachment,
   onRemoveAttachment,
+  onOpenVoiceToText,
 }) => {
   // Chọn ảnh từ thư viện
   const pickImage = async () => {
     try {
       const permission = await ImagePicker.requestMediaLibraryPermissionsAsync();
       if (!permission.granted) {
-        Alert.alert('Cần cấp quyền', 'Ứng dụng cần quyền truy cập ảnh.');
+        Alert.alert('Cần cấp quyền', 'Ứng dụng cần quyền truy cập thư viện.');
         return;
       }
 
@@ -49,6 +51,38 @@ export const MediaPickerModal: React.FC<MediaPickerModalProps> = ({
       }
     } catch (err) {
       console.error('Lỗi chọn ảnh:', err);
+    }
+  };
+
+  // Chọn video từ thư viện
+  const pickVideo = async () => {
+    try {
+      const permission = await ImagePicker.requestMediaLibraryPermissionsAsync();
+      if (!permission.granted) {
+        Alert.alert('Cần cấp quyền', 'Ứng dụng cần quyền truy cập thư viện.');
+        return;
+      }
+
+      const result = await ImagePicker.launchImageLibraryAsync({
+        mediaTypes: ['videos'],
+        allowsEditing: true,
+        quality: 0.8,
+      });
+
+      if (!result.canceled && result.assets[0]) {
+        const asset = result.assets[0];
+        const newAttachment: MediaAttachment = {
+          id: 'vid-' + Date.now(),
+          type: 'video',
+          uri: asset.uri,
+          name: asset.fileName || `Video_${attachments.length + 1}.mp4`,
+          size: asset.fileSize,
+          duration: asset.duration ? Math.round(asset.duration) : undefined,
+        };
+        onAddAttachment(newAttachment);
+      }
+    } catch (err) {
+      console.error('Lỗi chọn video:', err);
     }
   };
 
@@ -90,18 +124,37 @@ export const MediaPickerModal: React.FC<MediaPickerModalProps> = ({
           {/* Action Pickers */}
           <View style={styles.actions}>
             <TouchableOpacity style={styles.actionBtn} onPress={pickImage}>
-              <Ionicons name="image-outline" size={22} color="#2563EB" />
-              <Text style={styles.actionText}>Chèn hình ảnh</Text>
+              <Ionicons name="image-outline" size={20} color="#2563EB" />
+              <Text style={styles.actionText}>Chèn Ảnh</Text>
+            </TouchableOpacity>
+
+            <TouchableOpacity style={styles.actionBtn} onPress={pickVideo}>
+              <Ionicons name="videocam-outline" size={20} color="#059669" />
+              <Text style={styles.actionText}>Đính Video</Text>
             </TouchableOpacity>
 
             <TouchableOpacity style={styles.actionBtn} onPress={pickDocument}>
-              <Ionicons name="document-text-outline" size={22} color="#7C3AED" />
-              <Text style={styles.actionText}>Đính kèm tệp PDF</Text>
+              <Ionicons name="document-text-outline" size={20} color="#7C3AED" />
+              <Text style={styles.actionText}>Tệp PDF</Text>
             </TouchableOpacity>
           </View>
 
-          {/* Ghi âm trực tiếp */}
+          {/* Speech to text shortcut button */}
+          {onOpenVoiceToText && (
+            <TouchableOpacity
+              style={styles.voiceTextBtn}
+              onPress={() => {
+                onClose();
+                onOpenVoiceToText();
+              }}>
+              <Ionicons name="mic-outline" size={18} color="#2563EB" />
+              <Text style={styles.voiceBtnText}>🎤 Ghi âm giọng nói thành Văn Bản (Voice-to-Text)</Text>
+            </TouchableOpacity>
+          )}
+
+          {/* Ghi âm trực tiếp âm thanh */}
           <View style={styles.recorderBox}>
+            <Text style={styles.recorderLabel}>🎙️ Ghi âm tệp Âm Thanh (Audio file):</Text>
             <AudioRecorder onRecordingComplete={onAddAttachment} />
           </View>
 
@@ -117,6 +170,8 @@ export const MediaPickerModal: React.FC<MediaPickerModalProps> = ({
                     name={
                       item.type === 'image'
                         ? 'image'
+                        : item.type === 'video'
+                        ? 'videocam'
                         : item.type === 'audio'
                         ? 'mic'
                         : 'document'
@@ -125,6 +180,8 @@ export const MediaPickerModal: React.FC<MediaPickerModalProps> = ({
                     color={
                       item.type === 'image'
                         ? '#2563EB'
+                        : item.type === 'video'
+                        ? '#059669'
                         : item.type === 'audio'
                         ? '#DC2626'
                         : '#7C3AED'
@@ -197,6 +254,30 @@ const styles = StyleSheet.create({
   recorderBox: {
     marginBottom: 16,
   },
+  recorderLabel: {
+    fontSize: 12,
+    fontWeight: '700',
+    color: '#475569',
+    marginBottom: 6,
+  },
+  voiceTextBtn: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+    backgroundColor: '#EFF6FF',
+    borderWidth: 1,
+    borderColor: '#BFDBFE',
+    paddingHorizontal: 14,
+    paddingVertical: 10,
+    borderRadius: 12,
+    marginBottom: 12,
+  },
+  voiceBtnText: {
+    fontSize: 13,
+    fontWeight: '600',
+    color: '#2563EB',
+    flex: 1,
+  },
   sectionTitle: {
     fontSize: 14,
     fontWeight: '600',
@@ -212,6 +293,7 @@ const styles = StyleSheet.create({
     color: '#94A3B8',
     fontStyle: 'italic',
   },
+
   itemRow: {
     flexDirection: 'row',
     alignItems: 'center',
