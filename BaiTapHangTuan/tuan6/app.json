@@ -1,0 +1,22 @@
+{
+  "expo": {
+    "name": "Tuan06-Components-Hooks",
+    "slug": "tuan06-components-hooks",
+    "version": "1.0.0",
+    "orientation": "portrait",
+    "icon": "./assets/icon.png",
+    "userInterfaceStyle": "light",
+    "splash": {
+      "resizeMode": "contain",
+      "backgroundColor": "#4338CA"
+    },
+    "ios": {
+      "supportsTablet": true
+    },
+    "android": {
+      "adaptiveIcon": {
+        "backgroundColor": "#4338CA"
+      }
+    }
+  }
+}
