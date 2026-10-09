@@ -20,6 +20,10 @@ import { SearchBar } from '@/components/notes/SearchBar';
 import { AuthModal } from '@/components/AuthModal';
 import { ShareModal } from '@/components/ShareModal';
 import { ReminderAlertModal } from '@/components/ReminderAlertModal';
+import { UserAccountMenu } from '@/components/UserAccountMenu';
+import { AppointmentSchedulerModal } from '@/components/AppointmentSchedulerModal';
+import { EditProfileModal } from '@/components/EditProfileModal';
+import { ChangePasswordModal } from '@/components/ChangePasswordModal';
 import { ThemedText } from '@/components/themed-text';
 import { ThemedView } from '@/components/themed-view';
 import { ToastConfig, ToastNotification, ToastType } from '@/components/ui/ToastNotification';
@@ -70,6 +74,38 @@ export default function HomeScreen() {
   const [pinModalVisible, setPinModalVisible] = useState(false);
   const [pendingUnlockNote, setPendingUnlockNote] = useState<Note | null>(null);
   const [pendingUnlockAction, setPendingUnlockAction] = useState<'edit' | 'delete' | null>(null);
+
+  const [appointmentModalVisible, setAppointmentModalVisible] = useState(false);
+  const [editProfileModalVisible, setEditProfileModalVisible] = useState(false);
+  const [changePasswordModalVisible, setChangePasswordModalVisible] = useState(false);
+
+  const handleSaveAppointment = (noteId: string, reminderIsoString?: string) => {
+    const targetNote = notes.find((n) => n.id === noteId);
+    if (!targetNote) return;
+
+    handleSaveNote(
+      {
+        id: targetNote.id,
+        title: targetNote.title,
+        content: targetNote.content,
+        category: targetNote.category || 'Khác',
+        colorId: targetNote.colorId || 'yellow',
+        isPinned: targetNote.isPinned || false,
+        isLocked: targetNote.isLocked || false,
+        attachments: targetNote.attachments,
+        reminderAt: reminderIsoString,
+        tags: targetNote.tags,
+      },
+      targetNote
+    );
+
+    if (reminderIsoString) {
+      const formatted = new Date(reminderIsoString).toLocaleString('vi-VN');
+      showToast('Đã đặt lịch hẹn!', 'success', `Ghi chú "${targetNote.title}" vào lúc ${formatted}`);
+    } else {
+      showToast('Đã xóa lịch hẹn', 'info', `Ghi chú "${targetNote.title}"`);
+    }
+  };
 
   const handleOpenShare = (note: Note) => {
     setSelectedShareNote(note);
@@ -249,29 +285,30 @@ export default function HomeScreen() {
             </View>
 
             <View style={styles.headerRight}>
+              {/* Đặt lịch hẹn Button */}
               <TouchableOpacity
                 style={[
-                  styles.userAuthBtn,
+                  styles.scheduleBtn,
                   {
-                    backgroundColor: currentUser
-                      ? isDark
-                        ? '#1E2A3A'
-                        : '#EFF6FF'
-                      : isDark
-                        ? '#272B35'
-                        : '#F1F5F9',
+                    backgroundColor: isDark ? '#1E293B' : '#FEF3C7',
+                    borderColor: isDark ? '#334155' : '#FDE047',
                   },
                 ]}
-                onPress={() => setAuthModalVisible(true)}>
-                <Ionicons
-                  name={currentUser ? 'person-circle' : 'person-circle-outline'}
-                  size={22}
-                  color={currentUser ? '#2563EB' : colors.textSecondary}
-                />
-                <ThemedText style={[styles.userAuthText, { color: currentUser ? '#2563EB' : colors.text }]}>
-                  {currentUser ? currentUser.name : 'Đăng nhập'}
+                onPress={() => setAppointmentModalVisible(true)}>
+                <Ionicons name="calendar-outline" size={16} color="#D97706" />
+                <ThemedText style={[styles.scheduleBtnText, { color: isDark ? '#FBBF24' : '#B45309' }]}>
+                  Đặt lịch hẹn
                 </ThemedText>
               </TouchableOpacity>
+
+              {/* User Account Menu (Collapsed pill + Dropdown) */}
+              <UserAccountMenu
+                currentUser={currentUser}
+                onOpenAuth={() => setAuthModalVisible(true)}
+                onOpenEditProfile={() => setEditProfileModalVisible(true)}
+                onOpenChangePassword={() => setChangePasswordModalVisible(true)}
+                onLogout={handleLogout}
+              />
 
               <Pressable
                 onPress={openCreateModal}
@@ -416,6 +453,29 @@ export default function HomeScreen() {
         }}
       />
 
+      <AppointmentSchedulerModal
+        visible={appointmentModalVisible}
+        notes={notes}
+        onClose={() => setAppointmentModalVisible(false)}
+        onSaveAppointment={handleSaveAppointment}
+      />
+
+      <EditProfileModal
+        visible={editProfileModalVisible}
+        currentUser={currentUser}
+        onClose={() => setEditProfileModalVisible(false)}
+        onProfileUpdated={(updatedSession) => {
+          handleLoginSuccess(updatedSession);
+          showToast('Đã cập nhật thông tin thành công!', 'success');
+        }}
+      />
+
+      <ChangePasswordModal
+        visible={changePasswordModalVisible}
+        onClose={() => setChangePasswordModalVisible(false)}
+        onSuccess={(msg) => showToast(msg, 'success')}
+      />
+
       <ToastNotification toast={toast} onDismiss={() => setToast(null)} />
     </ThemedView>
   );
@@ -477,6 +537,19 @@ const styles = StyleSheet.create({
   headerSubtitle: {
     fontSize: 13,
     fontWeight: '500',
+  },
+  scheduleBtn: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
+    paddingHorizontal: 12,
+    paddingVertical: 8,
+    borderRadius: 14,
+    borderWidth: 1,
+  },
+  scheduleBtnText: {
+    fontSize: 13,
+    fontWeight: '700',
   },
   userAuthBtn: {
     flexDirection: 'row',

@@ -21,6 +21,11 @@ import { Colors, Spacing } from '@/constants/theme';
 import { NoteStorage } from '@/services/storage';
 import { AuthService } from '@/services/authService';
 import { Note, ActivityLog, User, DEFAULT_CATEGORIES } from '@/types/note';
+import { UserAccountMenu } from '@/components/UserAccountMenu';
+import { AppointmentSchedulerModal } from '@/components/AppointmentSchedulerModal';
+import { EditProfileModal } from '@/components/EditProfileModal';
+import { ChangePasswordModal } from '@/components/ChangePasswordModal';
+import { AuthModal } from '@/components/AuthModal';
 
 const CAT_COLORS: Record<string, string> = {
   'Công việc': '#3B82F6',
@@ -59,6 +64,32 @@ export default function StatisticsScreen() {
   const [toast, setToast] = useState<ToastConfig | null>(null);
   const [activeTab, setActiveTab] = useState<'stats' | 'history' | 'backup'>('stats');
   const [newCatName, setNewCatName] = useState('');
+
+  const [authModalVisible, setAuthModalVisible] = useState(false);
+  const [appointmentModalVisible, setAppointmentModalVisible] = useState(false);
+  const [editProfileModalVisible, setEditProfileModalVisible] = useState(false);
+  const [changePasswordModalVisible, setChangePasswordModalVisible] = useState(false);
+
+  const handleSaveAppointment = async (noteId: string, reminderIsoString?: string) => {
+    const targetNote = notes.find((n) => n.id === noteId);
+    if (!targetNote) return;
+
+    const updatedNote: Note = {
+      ...targetNote,
+      reminderAt: reminderIsoString,
+      updatedAt: new Date().toISOString(),
+    };
+
+    await NoteStorage.saveSingleNote(updatedNote);
+    await loadData();
+
+    if (reminderIsoString) {
+      const formatted = new Date(reminderIsoString).toLocaleString('vi-VN');
+      setToast({ message: '✅ Đã đặt lịch hẹn!', type: 'success', subMessage: `Ghi chú "${targetNote.title}" vào lúc ${formatted}` });
+    } else {
+      setToast({ message: 'Đã xóa lịch hẹn', type: 'info', subMessage: `Ghi chú "${targetNote.title}"` });
+    }
+  };
 
   const handleAddCategoryOutside = async () => {
     const clean = newCatName.trim();
@@ -185,10 +216,42 @@ export default function StatisticsScreen() {
         <View style={styles.container}>
           {/* Header */}
           <View style={styles.header}>
-            <ThemedText style={styles.headerTitle}>Thống Kê & Lịch Sử</ThemedText>
-            <ThemedText style={[styles.headerSubtitle, { color: colors.textSecondary }]}>
-              Tổng quan ghi chú, nhật ký hoạt động và sao lưu dữ liệu
-            </ThemedText>
+            <View style={{ flex: 1 }}>
+              <ThemedText style={styles.headerTitle}>Thống Kê & Lịch Sử</ThemedText>
+              <ThemedText style={[styles.headerSubtitle, { color: colors.textSecondary }]}>
+                Tổng quan ghi chú, nhật ký hoạt động và sao lưu dữ liệu
+              </ThemedText>
+            </View>
+
+            <View style={{ flexDirection: 'row', alignItems: 'center', gap: 10 }}>
+              <TouchableOpacity
+                style={[
+                  styles.scheduleBtn,
+                  {
+                    backgroundColor: isDark ? '#1E293B' : '#FEF3C7',
+                    borderColor: isDark ? '#334155' : '#FDE047',
+                  },
+                ]}
+                onPress={() => setAppointmentModalVisible(true)}>
+                <Ionicons name="calendar-outline" size={16} color="#D97706" />
+                <ThemedText style={[styles.scheduleBtnText, { color: isDark ? '#FBBF24' : '#B45309' }]}>
+                  Đặt lịch hẹn
+                </ThemedText>
+              </TouchableOpacity>
+
+              <UserAccountMenu
+                currentUser={currentUser}
+                onOpenAuth={() => setAuthModalVisible(true)}
+                onOpenEditProfile={() => setEditProfileModalVisible(true)}
+                onOpenChangePassword={() => setChangePasswordModalVisible(true)}
+                onLogout={async () => {
+                  await AuthService.clearSession();
+                  setCurrentUser(null);
+                  await loadData();
+                  setToast({ message: 'Đã đăng xuất', type: 'info' });
+                }}
+              />
+            </View>
           </View>
 
           {/* Tab Navigation */}
@@ -441,6 +504,47 @@ export default function StatisticsScreen() {
         </View>
       </ScrollView>
 
+      <AuthModal
+        visible={authModalVisible}
+        currentUser={currentUser}
+        onClose={() => setAuthModalVisible(false)}
+        onLoginSuccess={async (session) => {
+          setCurrentUser(session.user);
+          await loadData();
+          setToast({ message: `Xin chào ${session.user.name}!`, type: 'success' });
+        }}
+        onLogout={async () => {
+          await AuthService.clearSession();
+          setCurrentUser(null);
+          await loadData();
+          setToast({ message: 'Đã đăng xuất', type: 'info' });
+        }}
+      />
+
+      <AppointmentSchedulerModal
+        visible={appointmentModalVisible}
+        notes={notes}
+        onClose={() => setAppointmentModalVisible(false)}
+        onSaveAppointment={handleSaveAppointment}
+      />
+
+      <EditProfileModal
+        visible={editProfileModalVisible}
+        currentUser={currentUser}
+        onClose={() => setEditProfileModalVisible(false)}
+        onProfileUpdated={async (updatedSession) => {
+          setCurrentUser(updatedSession.user);
+          await loadData();
+          setToast({ message: 'Đã cập nhật thông tin thành công!', type: 'success' });
+        }}
+      />
+
+      <ChangePasswordModal
+        visible={changePasswordModalVisible}
+        onClose={() => setChangePasswordModalVisible(false)}
+        onSuccess={(msg) => setToast({ message: msg, type: 'success' })}
+      />
+
       <ToastNotification toast={toast} onDismiss={() => setToast(null)} />
     </ThemedView>
   );
@@ -458,8 +562,11 @@ const styles = StyleSheet.create({
     maxWidth: 780,
   },
   header: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
     marginBottom: Spacing.four,
-    gap: 4,
+    gap: 12,
   },
   headerTitle: {
     fontSize: 24,
@@ -468,6 +575,19 @@ const styles = StyleSheet.create({
   headerSubtitle: {
     fontSize: 14,
     lineHeight: 20,
+  },
+  scheduleBtn: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
+    paddingHorizontal: 12,
+    paddingVertical: 8,
+    borderRadius: 14,
+    borderWidth: 1,
+  },
+  scheduleBtnText: {
+    fontSize: 13,
+    fontWeight: '700',
   },
   tabRow: {
     flexDirection: 'row',

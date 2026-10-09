@@ -141,11 +141,32 @@ async function initDatabase() {
     await safeAddColumn('is_deleted', 'TINYINT(1) DEFAULT 0');
     await safeAddColumn('deleted_at', 'VARCHAR(50) DEFAULT NULL');
 
+    const safeAddUserColumn = async (colName, colDef) => {
+      try {
+        await pool.query(`ALTER TABLE \`users\` ADD COLUMN \`${colName}\` ${colDef};`);
+        console.log(`✅ [MySQL Migration] Đã bổ sung cột "${colName}" vào bảng "users".`);
+      } catch (err) {}
+    };
+    await safeAddUserColumn('avatar', 'LONGTEXT DEFAULT NULL');
+
     console.log(`✅ [MySQL] Kết nối thành công tới CSDL "${DB_NAME}" trên XAMPP!`);
   } catch (error) {
     console.error('❌ [MySQL] Lỗi khởi tạo CSDL XAMPP:', error.message);
   }
 }
+
+async function ensureDatabase(req, res, next) {
+  if (!pool) {
+    console.log('🔄 [MySQL] Đang thử kết nối lại tới CSDL MySQL...');
+    await initDatabase();
+  }
+  if (!pool) {
+    return res.status(500).json({ error: 'Chưa kết nối được với CSDL MySQL (XAMPP). Vui lòng đảm bảo MySQL trong XAMPP đang chạy.' });
+  }
+  next();
+}
+
+app.use('/api', ensureDatabase);
 
 // ----------------------------------------------------
 // AUTH API
@@ -178,7 +199,7 @@ app.post('/api/auth/register', async (req, res) => {
       [userId, name.trim(), cleanEmail, hashedPassword, createdAt]
     );
 
-    const userObj = { id: userId, name: name.trim(), email: cleanEmail, createdAt };
+    const userObj = { id: userId, name: name.trim(), email: cleanEmail, avatar: null, createdAt };
     const token = jwt.sign(userObj, JWT_SECRET, { expiresIn: '30d' });
 
     // Ghi nhật ký đăng ký
@@ -221,7 +242,7 @@ app.post('/api/auth/login', async (req, res) => {
       return res.status(401).json({ error: 'Email hoặc mật khẩu không chính xác.' });
     }
 
-    const userObj = { id: user.id, name: user.name, email: user.email, createdAt: user.created_at };
+    const userObj = { id: user.id, name: user.name, email: user.email, avatar: user.avatar || null, createdAt: user.created_at };
     const token = jwt.sign(userObj, JWT_SECRET, { expiresIn: '30d' });
 
     res.json({
@@ -239,6 +260,82 @@ app.post('/api/auth/login', async (req, res) => {
 // 3. Lấy thông tin user hiện tại
 app.get('/api/auth/me', requireAuth, (req, res) => {
   res.json({ user: req.user });
+});
+
+// 4. Cập nhật thông tin tài khoản (Tên, Ảnh đại diện)
+app.post('/api/auth/update-profile', requireAuth, async (req, res) => {
+  try {
+    const { name, avatar } = req.body;
+    const userId = req.user ? req.user.id : null;
+
+    if (!userId) {
+      return res.status(401).json({ error: 'Bạn cần đăng nhập để thực hiện thao tác này.' });
+    }
+    if (!name || !name.trim()) {
+      return res.status(400).json({ error: 'Họ tên không được để trống.' });
+    }
+
+    await pool.query('UPDATE `users` SET `name` = ?, `avatar` = ? WHERE `id` = ?', [name.trim(), avatar || null, userId]);
+    
+    const userObj = {
+      id: req.user.id,
+      name: name.trim(),
+      email: req.user.email,
+      avatar: avatar || null,
+      createdAt: req.user.createdAt || null,
+    };
+    const token = jwt.sign(userObj, JWT_SECRET, { expiresIn: '30d' });
+
+    res.json({
+      success: true,
+      message: 'Cập nhật thông tin thành công!',
+      user: userObj,
+      token,
+    });
+  } catch (err) {
+    console.error('Lỗi cập nhật thông tin:', err);
+    res.status(500).json({ error: 'Lỗi máy chủ khi cập nhật thông tin: ' + err.message });
+  }
+});
+
+// 5. Đổi mật khẩu tài khoản
+app.post('/api/auth/change-password', requireAuth, async (req, res) => {
+  try {
+    const { oldPassword, newPassword } = req.body;
+    const userId = req.user ? req.user.id : null;
+
+    if (!userId) {
+      return res.status(401).json({ error: 'Bạn cần đăng nhập để thực hiện thao tác này.' });
+    }
+    if (!oldPassword || !newPassword) {
+      return res.status(400).json({ error: 'Vui lòng nhập mật khẩu hiện tại và mật khẩu mới.' });
+    }
+    if (newPassword.length < 6) {
+      return res.status(400).json({ error: 'Mật khẩu mới phải có tối thiểu 6 ký tự.' });
+    }
+
+    const [rows] = await pool.query('SELECT * FROM `users` WHERE `id` = ?', [userId]);
+    if (rows.length === 0) {
+      return res.status(404).json({ error: 'Không tìm thấy người dùng.' });
+    }
+
+    const user = rows[0];
+    const isMatch = await bcrypt.compare(oldPassword, user.password);
+    if (!isMatch) {
+      return res.status(400).json({ error: 'Mật khẩu hiện tại không đúng.' });
+    }
+
+    const hashedNew = await bcrypt.hash(newPassword, 10);
+    await pool.query('UPDATE `users` SET `password` = ? WHERE `id` = ?', [hashedNew, userId]);
+
+    res.json({
+      success: true,
+      message: 'Đổi mật khẩu thành công!',
+    });
+  } catch (err) {
+    console.error('Lỗi đổi mật khẩu:', err);
+    res.status(500).json({ error: 'Lỗi máy chủ khi đổi mật khẩu: ' + err.message });
+  }
 });
 
 // ----------------------------------------------------

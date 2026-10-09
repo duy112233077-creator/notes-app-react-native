@@ -1,7 +1,7 @@
 {
   "expo": {
-    "name": "BTL_NoteApp",
-    "slug": "BTL_NoteApp",
+    "name": "NoteApp - Quản Lý Ghi Chú",
+    "slug": "noteapp",
     "version": "1.0.0",
     "orientation": "portrait",
     "icon": "./assets/images/icon.png",

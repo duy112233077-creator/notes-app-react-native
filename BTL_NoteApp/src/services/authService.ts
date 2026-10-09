@@ -91,6 +91,38 @@ export const AuthService = {
     return session;
   },
 
+  async updateProfile(name: string, avatar?: string): Promise<AuthSession> {
+    const headers = await this.getAuthHeaders();
+    const res = await fetch(`${API_BASE_URL}/auth/update-profile`, {
+      method: 'POST',
+      headers,
+      body: JSON.stringify({ name, avatar }),
+    });
+
+    const data = await res.json();
+    if (!res.ok) {
+      throw new Error(data.error || 'Cập nhật thông tin không thành công.');
+    }
+
+    const session: AuthSession = { token: data.token, user: data.user };
+    await this.setSession(session);
+    return session;
+  },
+
+  async changePassword(oldPassword: string, newPassword: string): Promise<void> {
+    const headers = await this.getAuthHeaders();
+    const res = await fetch(`${API_BASE_URL}/auth/change-password`, {
+      method: 'POST',
+      headers,
+      body: JSON.stringify({ oldPassword, newPassword }),
+    });
+
+    const data = await res.json();
+    if (!res.ok) {
+      throw new Error(data.error || 'Đổi mật khẩu không thành công.');
+    }
+  },
+
   async getAuthHeaders(): Promise<Record<string, string>> {
     const session = await this.getStoredSession();
     if (session && session.token) {
