@@ -54,6 +54,7 @@
     "ios": "expo start --ios",
     "web": "expo start --web",
     "server": "node server.js",
+    "seed": "node ./scripts/seed-notes.js",
     "lint": "expo lint"
   },
   "private": true

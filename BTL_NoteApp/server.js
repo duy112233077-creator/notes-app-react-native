@@ -149,6 +149,17 @@ async function initDatabase() {
     };
     await safeAddUserColumn('avatar', 'LONGTEXT DEFAULT NULL');
 
+    // 7. Tự động nạp 50 ghi chú mẫu nếu database chưa đủ 50 ghi chú
+    try {
+      const [countRows] = await pool.query('SELECT COUNT(*) AS total FROM `notes` WHERE `is_deleted` = 0 OR `is_deleted` IS NULL');
+      if (countRows && countRows[0] && countRows[0].total < 50) {
+        const { seedDatabase } = require('./scripts/seed-notes.js');
+        await seedDatabase();
+      }
+    } catch (seedErr) {
+      console.log('ℹ️ [Auto Seed] Bỏ qua nạp dữ liệu tự động:', seedErr.message);
+    }
+
     console.log(`✅ [MySQL] Kết nối thành công tới CSDL "${DB_NAME}" trên XAMPP!`);
   } catch (error) {
     console.error('❌ [MySQL] Lỗi khởi tạo CSDL XAMPP:', error.message);

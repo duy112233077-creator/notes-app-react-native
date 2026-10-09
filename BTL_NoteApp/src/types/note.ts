@@ -5,6 +5,10 @@ export const DEFAULT_CATEGORIES: NoteCategory[] = [
   'Học tập',
   'Cá nhân',
   'Ý tưởng',
+  'Tài chính',
+  'Du lịch',
+  'Sức khỏe',
+  'Dự án',
   'Khác',
 ];
 

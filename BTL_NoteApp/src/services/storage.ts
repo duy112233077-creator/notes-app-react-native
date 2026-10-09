@@ -3,6 +3,7 @@ import { Platform } from 'react-native';
 import { Note, ActivityLog, DEFAULT_CATEGORIES } from '@/types/note';
 import { API_BASE_URL } from '@/constants/config';
 import { AuthService } from '@/services/authService';
+import { INITIAL_50_NOTES } from '@/constants/initialNotes';
 
 const STORAGE_KEY = '@noteapp_notes_list_v1';
 const PENDING_QUEUE_KEY = '@noteapp_pending_actions_v1';
@@ -15,56 +16,7 @@ export type PendingAction =
   | { type: 'SAVE'; note: Note; timestamp: number }
   | { type: 'DELETE'; id: string; timestamp: number };
 
-export const INITIAL_NOTES: Note[] = [
-  {
-    id: 'note-1',
-    title: '🌟 Chào mừng bạn đến với Note App!',
-    content:
-      'Dữ liệu đã kết nối trực tiếp với MySQL trên XAMPP!\n• Bạn tạo ghi chú mới sẽ tự động lưu vào MySQL.\n• Bạn sửa nội dung hoặc xóa ghi chú thì MySQL cũng cập nhật tương ứng.\n• Có thể mở phpMyAdmin (http://localhost/phpmyadmin) để xem bảng "notes".\n• Bạn cũng có thể khóa bảo mật các ghi chú quan trọng bằng mã PIN!',
-    category: 'Ý tưởng',
-    colorId: 'yellow',
-    isPinned: true,
-    isLocked: false,
-    createdAt: new Date(Date.now() - 3600000 * 24).toISOString(),
-    updatedAt: new Date(Date.now() - 3600000 * 24).toISOString(),
-  },
-  {
-    id: 'note-2',
-    title: '📚 Nhiệm vụ học tập tuần này',
-    content:
-      '1. Hoàn thiện bài tập lớn ứng dụng React Native.\n2. Kiểm tra kết nối cơ sở dữ liệu MySQL trên XAMPP.\n3. Chuẩn bị slide báo cáo tiến độ và demo các tính năng nâng cao.',
-    category: 'Học tập',
-    colorId: 'blue',
-    isPinned: true,
-    isLocked: false,
-    createdAt: new Date(Date.now() - 3600000 * 12).toISOString(),
-    updatedAt: new Date(Date.now() - 3600000 * 12).toISOString(),
-  },
-  {
-    id: 'note-3',
-    title: '🔒 Thông tin mật cá nhân',
-    content:
-      'Đây là ghi chú được bảo vệ bằng lớp khóa thứ hai.\nChỉ những người biết mã PIN (mặc định: 1234) mới có thể mở xem và chỉnh sửa nội dung này!',
-    category: 'Cá nhân',
-    colorId: 'purple',
-    isPinned: false,
-    isLocked: true,
-    createdAt: new Date(Date.now() - 3600000 * 6).toISOString(),
-    updatedAt: new Date(Date.now() - 3600000 * 6).toISOString(),
-  },
-  {
-    id: 'note-4',
-    title: '🛒 Mua sắm cuối tuần',
-    content:
-      '• Sách mới về lập trình TypeScript & Mobile App\n• Cà phê hạt rang mộc\n• Bàn phím cơ & giá đỡ máy tính xách tay',
-    category: 'Cá nhân',
-    colorId: 'rose',
-    isPinned: false,
-    isLocked: false,
-    createdAt: new Date(Date.now() - 3600000 * 2).toISOString(),
-    updatedAt: new Date(Date.now() - 3600000 * 2).toISOString(),
-  },
-];
+export const INITIAL_NOTES: Note[] = INITIAL_50_NOTES;
 
 export const NoteStorage = {
   // Lấy toàn bộ danh sách ghi chú (không bao gồm các ghi chú đã chuyển vào Thùng rác)
@@ -406,7 +358,19 @@ export const NoteStorage = {
       }
 
       const parsed = JSON.parse(json);
-      return Array.isArray(parsed) ? parsed : INITIAL_NOTES;
+      if (Array.isArray(parsed)) {
+        if (parsed.length < INITIAL_NOTES.length) {
+          const existingIds = new Set(parsed.map((n: Note) => n.id));
+          const missing = INITIAL_NOTES.filter((n) => !existingIds.has(n.id));
+          if (missing.length > 0) {
+            const updated = [...parsed, ...missing];
+            await this.saveToLocalCache(updated);
+            return updated;
+          }
+        }
+        return parsed;
+      }
+      return INITIAL_NOTES;
     } catch (err) {
       console.error('Lỗi khi đọc cache cục bộ:', err);
       return INITIAL_NOTES;
