@@ -94,6 +94,9 @@ export interface User {
   email: string;
   avatar?: string;
   createdAt?: string;
+  isAdmin?: boolean;         // Quyền quản trị viên
+  isVip?: boolean;           // Tài khoản VIP
+  storageLimitMb?: number;   // Giới hạn dung lượng (MB), mặc định 5MB
 }
 
 export interface AuthSession {
@@ -120,6 +123,11 @@ export interface Note {
   isLocked?: boolean;
   attachments?: MediaAttachment[];
   reminderAt?: string;
+  advanceReminderMinutes?: number; // Thông báo trước X phút (0 = không, 5/10/15/30/60/120)
+  isCompleted?: boolean;           // Lịch hẹn đã hoàn thành
+  completedAt?: string;            // Thời điểm đánh dấu hoàn thành
+  rating?: number;                 // Đánh giá sau hoàn thành (1-5 sao)
+  ratingNote?: string;             // Ghi chú đánh giá
   shareCode?: string;
   collaborators?: string[];
   tags?: string[];

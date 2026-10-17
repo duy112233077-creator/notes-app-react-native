@@ -8,13 +8,32 @@ import {
 } from 'expo-router/ui';
 import { Ionicons } from '@expo/vector-icons';
 import { Pressable, View, StyleSheet } from 'react-native';
+import { useState, useEffect } from 'react';
 
 import { ThemedText } from './themed-text';
 import { ThemedView } from './themed-view';
 
 import { MaxContentWidth, Spacing } from '@/constants/theme';
+import { AuthService } from '@/services/authService';
 
 export default function AppTabs() {
+  const [isAdmin, setIsAdmin] = useState(false);
+
+  useEffect(() => {
+    const checkAdmin = async () => {
+      try {
+        const session = await AuthService.getStoredSession();
+        setIsAdmin(Boolean(session?.user?.isAdmin));
+      } catch {
+        setIsAdmin(false);
+      }
+    };
+    checkAdmin();
+    // Poll mỗi 2s để cập nhật khi user đăng nhập/đăng xuất
+    const interval = setInterval(checkAdmin, 2000);
+    return () => clearInterval(interval);
+  }, []);
+
   return (
     <Tabs>
       <TabSlot style={{ height: '100%' }} />
@@ -25,11 +44,23 @@ export default function AppTabs() {
               Ghi chú
             </TabButton>
           </TabTrigger>
+          <TabTrigger name="schedule" href={"/schedule" as any} asChild>
+            <TabButton icon="calendar-outline" activeIcon="calendar">
+              Lịch hẹn
+            </TabButton>
+          </TabTrigger>
           <TabTrigger name="explore" href="/explore" asChild>
             <TabButton icon="pie-chart-outline" activeIcon="pie-chart">
               Thống kê
             </TabButton>
           </TabTrigger>
+          {isAdmin && (
+            <TabTrigger name="admin" href={"/admin" as any} asChild>
+              <TabButton icon="shield-outline" activeIcon="shield-checkmark">
+                Admin
+              </TabButton>
+            </TabTrigger>
+          )}
         </CustomTabList>
       </TabList>
     </Tabs>

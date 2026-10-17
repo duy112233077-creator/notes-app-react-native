@@ -38,7 +38,7 @@ export const NotificationService = {
     }
   },
 
-  async scheduleNoteReminder(noteId: string, title: string, body: string, triggerDate: Date, collaborators?: string[]): Promise<string | null> {
+  async scheduleNoteReminder(noteId: string, title: string, body: string, triggerDate: Date, collaborators?: string[], advanceMinutes?: number): Promise<string | null> {
     await this.requestPermissions();
 
     try {
@@ -51,6 +51,35 @@ export const NotificationService = {
 
       const secondsFromNow = Math.max(1, Math.floor((triggerDate.getTime() - now.getTime()) / 1000));
       const sharedInfo = collaborators && collaborators.length > 0 ? ` (Đã thông báo cho ${collaborators.length} người cộng tác)` : '';
+
+      // Lên lịch thông báo trước nếu có cài đặt
+      if (advanceMinutes && advanceMinutes > 0) {
+        const advanceMs = advanceMinutes * 60 * 1000;
+        const advanceDate = new Date(triggerDate.getTime() - advanceMs);
+        if (advanceDate > now) {
+          const advanceSeconds = Math.floor((advanceDate.getTime() - now.getTime()) / 1000);
+          if (Platform.OS === 'web') {
+            setTimeout(() => {
+              this.triggerInstantNotification(
+                `🔔 Sắp đến giờ: ${title}`,
+                `Còn ${advanceMinutes} phút nữa đến lịch hẹn của bạn!`
+              );
+            }, advanceSeconds * 1000);
+          } else {
+            await Notifications.scheduleNotificationAsync({
+              content: {
+                title: `🔔 Sắp đến giờ: ${title}`,
+                body: `Còn ${advanceMinutes} phút nữa đến lịch hẹn của bạn!`,
+                data: { noteId, isAdvance: true },
+              },
+              trigger: {
+                type: Notifications.SchedulableTriggerInputTypes.TIME_INTERVAL,
+                seconds: advanceSeconds,
+              },
+            });
+          }
+        }
+      }
 
       if (Platform.OS === 'web') {
         setTimeout(() => {

@@ -134,12 +134,18 @@ async function initDatabase() {
     await safeAddColumn('is_locked', 'TINYINT(1) DEFAULT 0');
     await safeAddColumn('attachments', 'LONGTEXT DEFAULT NULL');
     await safeAddColumn('reminder_at', 'VARCHAR(50) DEFAULT NULL');
+    await safeAddColumn('advance_reminder_minutes', 'INT DEFAULT 0');
+    await safeAddColumn('is_completed', 'TINYINT(1) DEFAULT 0');
+    await safeAddColumn('completed_at', 'VARCHAR(50) DEFAULT NULL');
+    await safeAddColumn('rating', 'TINYINT DEFAULT NULL');
+    await safeAddColumn('rating_note', 'TEXT DEFAULT NULL');
     await safeAddColumn('share_code', 'VARCHAR(100) DEFAULT NULL');
     await safeAddColumn('collaborators', 'LONGTEXT DEFAULT NULL');
     await safeAddColumn('last_modified_by', 'LONGTEXT DEFAULT NULL');
     await safeAddColumn('edit_history', 'LONGTEXT DEFAULT NULL');
     await safeAddColumn('is_deleted', 'TINYINT(1) DEFAULT 0');
     await safeAddColumn('deleted_at', 'VARCHAR(50) DEFAULT NULL');
+
 
     const safeAddUserColumn = async (colName, colDef) => {
       try {
@@ -148,6 +154,28 @@ async function initDatabase() {
       } catch (err) {}
     };
     await safeAddUserColumn('avatar', 'LONGTEXT DEFAULT NULL');
+    await safeAddUserColumn('is_admin', 'TINYINT(1) DEFAULT 0');
+    await safeAddUserColumn('is_vip', 'TINYINT(1) DEFAULT 0');
+    await safeAddUserColumn('storage_limit_mb', 'INT DEFAULT 5');
+
+    // 8. Tự động tạo tài khoản ADMIN mặc định nếu chưa tồn tại
+    try {
+      const [adminRows] = await pool.query('SELECT id FROM `users` WHERE `email` = ?', ['admin@noteapp.com']);
+      if (adminRows.length === 0) {
+        const adminId = 'admin-root-001';
+        const adminPwd = await bcrypt.hash('Admin@123456', 10);
+        await pool.query(
+          'INSERT INTO `users` (`id`, `name`, `email`, `password`, `created_at`, `is_admin`, `is_vip`, `storage_limit_mb`) VALUES (?, ?, ?, ?, ?, 1, 1, 999)',
+          [adminId, 'Quản Trị Viên', 'admin@noteapp.com', adminPwd, new Date().toISOString()]
+        );
+        console.log('✅ [Admin] Đã tạo tài khoản admin mặc định: admin@noteapp.com / Admin@123456');
+      } else {
+        // Đảm bảo tài khoản admin luôn được cấp quyền admin
+        await pool.query('UPDATE `users` SET `is_admin`=1, `is_vip`=1, `storage_limit_mb`=999 WHERE `email`=?', ['admin@noteapp.com']);
+      }
+    } catch (adminErr) {
+      console.log('ℹ️ [Admin] Bỏ qua tạo tài khoản admin:', adminErr.message);
+    }
 
     // 7. Tự động nạp 50 ghi chú mẫu nếu database chưa đủ 50 ghi chú
     try {
@@ -210,7 +238,16 @@ app.post('/api/auth/register', async (req, res) => {
       [userId, name.trim(), cleanEmail, hashedPassword, createdAt]
     );
 
-    const userObj = { id: userId, name: name.trim(), email: cleanEmail, avatar: null, createdAt };
+    const userObj = {
+      id: userId,
+      name: name.trim(),
+      email: cleanEmail,
+      avatar: null,
+      createdAt,
+      isAdmin: false,
+      isVip: false,
+      storageLimitMb: 5,
+    };
     const token = jwt.sign(userObj, JWT_SECRET, { expiresIn: '30d' });
 
     // Ghi nhật ký đăng ký
@@ -253,7 +290,16 @@ app.post('/api/auth/login', async (req, res) => {
       return res.status(401).json({ error: 'Email hoặc mật khẩu không chính xác.' });
     }
 
-    const userObj = { id: user.id, name: user.name, email: user.email, avatar: user.avatar || null, createdAt: user.created_at };
+    const userObj = {
+      id: user.id,
+      name: user.name,
+      email: user.email,
+      avatar: user.avatar || null,
+      createdAt: user.created_at,
+      isAdmin: Boolean(user.is_admin),
+      isVip: Boolean(user.is_vip),
+      storageLimitMb: user.storage_limit_mb ? Number(user.storage_limit_mb) : 5,
+    };
     const token = jwt.sign(userObj, JWT_SECRET, { expiresIn: '30d' });
 
     res.json({
@@ -428,6 +474,11 @@ function parseNoteRecord(r) {
     isLocked: Boolean(r.is_locked),
     attachments,
     reminderAt: r.reminder_at || undefined,
+    advanceReminderMinutes: r.advance_reminder_minutes ? Number(r.advance_reminder_minutes) : undefined,
+    isCompleted: Boolean(r.is_completed),
+    completedAt: r.completed_at || undefined,
+    rating: r.rating ? Number(r.rating) : undefined,
+    ratingNote: r.rating_note || undefined,
     shareCode: r.share_code || undefined,
     collaborators,
     lastModifiedBy,
@@ -498,6 +549,11 @@ app.post('/api/notes', authenticateToken, async (req, res) => {
       isLocked,
       attachments,
       reminderAt,
+      advanceReminderMinutes,
+      isCompleted,
+      completedAt,
+      rating,
+      ratingNote,
       shareCode,
       collaborators,
       lastModifiedBy,
@@ -545,11 +601,12 @@ app.post('/api/notes', authenticateToken, async (req, res) => {
     const query = `
       INSERT INTO \`notes\` (
         \`id\`, \`user_id\`, \`title\`, \`content\`, \`category\`, \`color_id\`, 
-        \`is_pinned\`, \`is_locked\`, \`attachments\`, \`reminder_at\`, \`share_code\`, 
-        \`collaborators\`, \`last_modified_by\`, \`edit_history\`, \`is_deleted\`, \`deleted_at\`,
-        \`created_at\`, \`updated_at\`
+        \`is_pinned\`, \`is_locked\`, \`attachments\`, \`reminder_at\`,
+        \`advance_reminder_minutes\`, \`is_completed\`, \`completed_at\`, \`rating\`, \`rating_note\`,
+        \`share_code\`, \`collaborators\`, \`last_modified_by\`, \`edit_history\`,
+        \`is_deleted\`, \`deleted_at\`, \`created_at\`, \`updated_at\`
       )
-      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
       ON DUPLICATE KEY UPDATE
         \`user_id\` = COALESCE(VALUES(\`user_id\`), \`user_id\`),
         \`title\` = VALUES(\`title\`),
@@ -560,6 +617,11 @@ app.post('/api/notes', authenticateToken, async (req, res) => {
         \`is_locked\` = VALUES(\`is_locked\`),
         \`attachments\` = VALUES(\`attachments\`),
         \`reminder_at\` = VALUES(\`reminder_at\`),
+        \`advance_reminder_minutes\` = VALUES(\`advance_reminder_minutes\`),
+        \`is_completed\` = VALUES(\`is_completed\`),
+        \`completed_at\` = VALUES(\`completed_at\`),
+        \`rating\` = VALUES(\`rating\`),
+        \`rating_note\` = VALUES(\`rating_note\`),
         \`share_code\` = VALUES(\`share_code\`),
         \`collaborators\` = VALUES(\`collaborators\`),
         \`last_modified_by\` = VALUES(\`last_modified_by\`),
@@ -580,6 +642,11 @@ app.post('/api/notes', authenticateToken, async (req, res) => {
       isLocked ? 1 : 0,
       attachmentsJson,
       reminderAt || null,
+      advanceReminderMinutes ? Number(advanceReminderMinutes) : 0,
+      isCompleted ? 1 : 0,
+      completedAt || null,
+      rating ? Number(rating) : null,
+      ratingNote || null,
       shareCode || null,
       collaboratorsJson,
       lastModifiedByJson,
@@ -928,6 +995,156 @@ app.get('/api/health', (req, res) => {
     databaseReady: Boolean(pool),
     serverTime: new Date().toISOString(),
   });
+});
+
+// ----------------------------------------------------
+// ADMIN API — Chỉ tài khoản có is_admin = 1 mới truy cập
+// ----------------------------------------------------
+
+function requireAdmin(req, res, next) {
+  authenticateToken(req, res, () => {
+    if (!req.user) {
+      return res.status(401).json({ error: 'Bạn chưa đăng nhập.' });
+    }
+    if (!req.user.isAdmin) {
+      return res.status(403).json({ error: 'Bạn không có quyền quản trị viên.' });
+    }
+    next();
+  });
+}
+
+// 1. Lấy danh sách tất cả người dùng + thống kê
+app.get('/api/admin/users', requireAdmin, async (req, res) => {
+  try {
+    // Lấy tất cả users
+    const [users] = await pool.query(
+      'SELECT `id`, `name`, `email`, `avatar`, `created_at`, `is_admin`, `is_vip`, `storage_limit_mb` FROM `users` ORDER BY `created_at` DESC'
+    );
+
+    // Lấy số lượng ghi chú + ước tính dung lượng cho từng user
+    const result = await Promise.all(
+      users.map(async (u) => {
+        const [noteStats] = await pool.query(
+          `SELECT 
+            COUNT(*) AS total_notes,
+            SUM(CASE WHEN is_deleted=0 OR is_deleted IS NULL THEN 1 ELSE 0 END) AS active_notes,
+            SUM(CASE WHEN is_deleted=1 THEN 1 ELSE 0 END) AS deleted_notes,
+            SUM(CASE WHEN reminder_at IS NOT NULL AND (is_deleted=0 OR is_deleted IS NULL) THEN 1 ELSE 0 END) AS notes_with_reminder,
+            SUM(CASE WHEN is_completed=1 THEN 1 ELSE 0 END) AS completed_notes,
+            SUM(LENGTH(IFNULL(content,'')) + LENGTH(IFNULL(title,'')) + LENGTH(IFNULL(attachments,''))) AS estimated_bytes
+          FROM \`notes\` WHERE \`user_id\` = ?`,
+          [u.id]
+        );
+
+        const stats = noteStats[0] || {};
+        const estimatedKb = Math.round((stats.estimated_bytes || 0) / 1024);
+
+        return {
+          id: u.id,
+          name: u.name,
+          email: u.email,
+          avatar: u.avatar || null,
+          createdAt: u.created_at,
+          isAdmin: Boolean(u.is_admin),
+          isVip: Boolean(u.is_vip),
+          storageLimitMb: u.storage_limit_mb ? Number(u.storage_limit_mb) : 5,
+          stats: {
+            totalNotes: Number(stats.total_notes || 0),
+            activeNotes: Number(stats.active_notes || 0),
+            deletedNotes: Number(stats.deleted_notes || 0),
+            notesWithReminder: Number(stats.notes_with_reminder || 0),
+            completedNotes: Number(stats.completed_notes || 0),
+            estimatedKb,
+          },
+        };
+      })
+    );
+
+    res.json(result);
+  } catch (err) {
+    console.error('Lỗi lấy danh sách users admin:', err);
+    res.status(500).json({ error: 'Lỗi máy chủ: ' + err.message });
+  }
+});
+
+// 2. Cập nhật VIP / storage_limit cho user
+app.post('/api/admin/users/:id/set-vip', requireAdmin, async (req, res) => {
+  try {
+    const { id } = req.params;
+    const { isVip, storageLimitMb } = req.body;
+
+    if (id === 'admin-root-001') {
+      return res.status(400).json({ error: 'Không thể thay đổi tài khoản admin gốc.' });
+    }
+
+    await pool.query(
+      'UPDATE `users` SET `is_vip`=?, `storage_limit_mb`=? WHERE `id`=?',
+      [isVip ? 1 : 0, storageLimitMb || 5, id]
+    );
+
+    res.json({ success: true, message: `Đã cập nhật VIP=${isVip}, storage=${storageLimitMb}MB cho user ${id}` });
+  } catch (err) {
+    res.status(500).json({ error: 'Lỗi khi cập nhật VIP: ' + err.message });
+  }
+});
+
+// 3. Đặt/thu hồi quyền admin cho user
+app.post('/api/admin/users/:id/set-admin', requireAdmin, async (req, res) => {
+  try {
+    const { id } = req.params;
+    const { isAdmin } = req.body;
+
+    if (id === 'admin-root-001') {
+      return res.status(400).json({ error: 'Không thể thay đổi tài khoản admin gốc.' });
+    }
+    if (id === req.user.id) {
+      return res.status(400).json({ error: 'Không thể thay đổi quyền của chính mình.' });
+    }
+
+    await pool.query('UPDATE `users` SET `is_admin`=? WHERE `id`=?', [isAdmin ? 1 : 0, id]);
+    res.json({ success: true, message: `Đã ${isAdmin ? 'cấp' : 'thu hồi'} quyền admin cho user ${id}` });
+  } catch (err) {
+    res.status(500).json({ error: 'Lỗi khi cập nhật admin: ' + err.message });
+  }
+});
+
+// 4. Xóa user (admin only — không xóa admin root)
+app.delete('/api/admin/users/:id', requireAdmin, async (req, res) => {
+  try {
+    const { id } = req.params;
+    if (id === 'admin-root-001' || id === req.user.id) {
+      return res.status(400).json({ error: 'Không thể xóa tài khoản này.' });
+    }
+
+    await pool.query('DELETE FROM `users` WHERE `id`=?', [id]);
+    await pool.query('DELETE FROM `notes` WHERE `user_id`=?', [id]);
+    await pool.query('DELETE FROM `activity_logs` WHERE `user_id`=?', [id]);
+
+    res.json({ success: true, message: 'Đã xóa tài khoản và toàn bộ dữ liệu liên quan.' });
+  } catch (err) {
+    res.status(500).json({ error: 'Lỗi khi xóa user: ' + err.message });
+  }
+});
+
+// 5. Thống kê tổng hợp hệ thống
+app.get('/api/admin/stats', requireAdmin, async (req, res) => {
+  try {
+    const [[userCount]] = await pool.query('SELECT COUNT(*) AS total FROM `users`');
+    const [[vipCount]] = await pool.query('SELECT COUNT(*) AS total FROM `users` WHERE `is_vip`=1');
+    const [[noteCount]] = await pool.query('SELECT COUNT(*) AS total FROM `notes` WHERE is_deleted=0');
+    const [[trashCount]] = await pool.query('SELECT COUNT(*) AS total FROM `notes` WHERE is_deleted=1');
+    const [[logCount]] = await pool.query('SELECT COUNT(*) AS total FROM `activity_logs`');
+
+    res.json({
+      totalUsers: Number(userCount.total),
+      vipUsers: Number(vipCount.total),
+      totalNotes: Number(noteCount.total),
+      trashNotes: Number(trashCount.total),
+      totalLogs: Number(logCount.total),
+    });
+  } catch (err) {
+    res.status(500).json({ error: 'Lỗi thống kê: ' + err.message });
+  }
 });
 
 app.listen(PORT, async () => {

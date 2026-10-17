@@ -134,3 +134,51 @@ export const AuthService = {
     return { 'Content-Type': 'application/json' };
   },
 };
+
+// ===== ADMIN SERVICE =====
+export const AdminService = {
+  async getSystemStats(): Promise<{
+    totalUsers: number; vipUsers: number; totalNotes: number; trashNotes: number; totalLogs: number;
+  }> {
+    const headers = await AuthService.getAuthHeaders();
+    const res = await fetch(`${API_BASE_URL}/admin/stats`, { headers });
+    if (!res.ok) throw new Error((await res.json()).error || 'Lỗi lấy thống kê hệ thống');
+    return res.json();
+  },
+
+  async getAllUsers(): Promise<any[]> {
+    const headers = await AuthService.getAuthHeaders();
+    const res = await fetch(`${API_BASE_URL}/admin/users`, { headers });
+    if (!res.ok) throw new Error((await res.json()).error || 'Lỗi lấy danh sách người dùng');
+    return res.json();
+  },
+
+  async setVip(userId: string, isVip: boolean, storageLimitMb: number): Promise<void> {
+    const headers = await AuthService.getAuthHeaders();
+    const res = await fetch(`${API_BASE_URL}/admin/users/${userId}/set-vip`, {
+      method: 'POST',
+      headers,
+      body: JSON.stringify({ isVip, storageLimitMb }),
+    });
+    if (!res.ok) throw new Error((await res.json()).error || 'Lỗi cập nhật VIP');
+  },
+
+  async setAdmin(userId: string, isAdmin: boolean): Promise<void> {
+    const headers = await AuthService.getAuthHeaders();
+    const res = await fetch(`${API_BASE_URL}/admin/users/${userId}/set-admin`, {
+      method: 'POST',
+      headers,
+      body: JSON.stringify({ isAdmin }),
+    });
+    if (!res.ok) throw new Error((await res.json()).error || 'Lỗi cập nhật quyền admin');
+  },
+
+  async deleteUser(userId: string): Promise<void> {
+    const headers = await AuthService.getAuthHeaders();
+    const res = await fetch(`${API_BASE_URL}/admin/users/${userId}`, {
+      method: 'DELETE',
+      headers,
+    });
+    if (!res.ok) throw new Error((await res.json()).error || 'Lỗi xóa tài khoản');
+  },
+};
