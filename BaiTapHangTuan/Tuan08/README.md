@@ -428,6 +428,12 @@ const MOCK_PRODUCTS = [
     const { id, name, price } = route.params;
     ```
 
+#### 5. Hình ảnh minh chứng kết quả chạy thực tế (Screenshots theo yêu cầu nộp):
+
+| 📱 1. Màn hình Danh sách (Product List - 10 Items FlatList) | 🔍 2. Màn hình Chi tiết (Product Detail - Nhận Params) |
+| :---: | :---: |
+| <img src="./screenshots/screenshot_product_list.jpg" width="340" alt="Ảnh Màn hình Danh sách Sản phẩm" /> | <img src="./screenshots/screenshot_product_detail.jpg" width="340" alt="Ảnh Màn hình Chi tiết Sản phẩm" /> |
+
 ---
 
 ## 📂 CẤU TRÚC MÃ NGUỒN THƯ MỤC TUẦN 8
