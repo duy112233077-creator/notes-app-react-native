@@ -1,0 +1,21 @@
+{
+  "expo": {
+    "name": "Tuan08-Props-Components-FlatList-Detail",
+    "slug": "tuan08-props-components-flatlist-detail",
+    "version": "1.0.0",
+    "orientation": "portrait",
+    "userInterfaceStyle": "light",
+    "splash": {
+      "resizeMode": "contain",
+      "backgroundColor": "#0F172A"
+    },
+    "ios": {
+      "supportsTablet": true
+    },
+    "android": {
+      "adaptiveIcon": {
+        "backgroundColor": "#0F172A"
+      }
+    }
+  }
+}
