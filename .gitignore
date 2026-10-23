@@ -141,3 +141,10 @@ dist
 vite.config.js.timestamp-*
 vite.config.ts.timestamp-*
 .vite/
+
+# Expo cache
+.expo/
+*.expo/
+
+# Local helper scripts
+push_tuan09.bat
