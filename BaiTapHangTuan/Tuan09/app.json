@@ -1,0 +1,21 @@
+{
+  "expo": {
+    "name": "Tuan09-StyleSheet-Flexbox-Responsive",
+    "slug": "tuan09-stylesheet-flexbox-responsive",
+    "version": "1.0.0",
+    "orientation": "default",
+    "userInterfaceStyle": "light",
+    "splash": {
+      "resizeMode": "contain",
+      "backgroundColor": "#0F172A"
+    },
+    "ios": {
+      "supportsTablet": true
+    },
+    "android": {
+      "adaptiveIcon": {
+        "backgroundColor": "#0F172A"
+      }
+    }
+  }
+}

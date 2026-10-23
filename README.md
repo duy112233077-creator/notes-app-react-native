@@ -19,7 +19,8 @@
 | **Tuần 05** | Quản lý danh sách với ScrollView và FlatList | [`BaiTapHangTuan/Tuan05`](./BaiTapHangTuan/Tuan05) | ✅ Hoàn thành |
 | **Tuần 06** | Component, Props và React Hooks (useState, useEffect) | [`BaiTapHangTuan/tuan6`](./BaiTapHangTuan/tuan6) | ✅ Hoàn thành |
 | **Tuần 07** | Controlled Components, Lifecycle & Form Validation | [`BaiTapHangTuan/Tuan07`](./BaiTapHangTuan/Tuan07) | ✅ Hoàn thành |
-| **Tuần 08** | **Props, Component Reusability, FlatList & Navigation Params** | [`BaiTapHangTuan/Tuan08`](./BaiTapHangTuan/Tuan08) | ✅ **Mới hoàn thành** |
+| **Tuần 08** | Props, Component Reusability, FlatList & Navigation Params | [`BaiTapHangTuan/Tuan08`](./BaiTapHangTuan/Tuan08) | ✅ Hoàn thành |
+| **Tuần 09** | **StyleSheet.create(), Flexbox Layout & Responsive UI** | [`BaiTapHangTuan/Tuan09`](./BaiTapHangTuan/Tuan09) | ✅ **Mới hoàn thành** |
 
 ---
 

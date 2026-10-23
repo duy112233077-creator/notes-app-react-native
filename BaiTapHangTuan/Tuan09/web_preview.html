@@ -1,0 +1,1190 @@
+<!DOCTYPE html>
+<html lang="vi">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>React Native Tuần 09 - StyleSheet, Flexbox & Responsive UI</title>
+  <style>
+    :root {
+      --bg-dark: #0F172A;
+      --card-bg: #FFFFFF;
+      --primary: #2563EB;
+      --primary-hover: #1D4ED8;
+      --text-main: #0F172A;
+      --text-sub: #64748B;
+      --border: #E2E8F0;
+      --border-focus: #3B82F6;
+      --success: #10B981;
+      --danger: #EF4444;
+      --warning: #F59E0B;
+    }
+
+    * {
+      box-sizing: border-box;
+      margin: 0;
+      padding: 0;
+      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif;
+    }
+
+    body {
+      background-color: #F1F5F9;
+      color: var(--text-main);
+      display: flex;
+      flex-direction: column;
+      min-height: 100vh;
+    }
+
+    /* TOP HEADER BAR */
+    header {
+      background-color: var(--bg-dark);
+      color: #FFFFFF;
+      padding: 16px 24px;
+      border-bottom: 1px solid #1E293B;
+    }
+    .header-badge {
+      display: inline-block;
+      background-color: var(--primary);
+      color: #FFFFFF;
+      font-size: 11px;
+      font-weight: 800;
+      letter-spacing: 0.8px;
+      padding: 3px 8px;
+      border-radius: 6px;
+      margin-bottom: 6px;
+    }
+    .header-title {
+      font-size: 20px;
+      font-weight: 800;
+      color: #F8FAFC;
+      margin-bottom: 4px;
+    }
+    .header-meta {
+      font-size: 13px;
+      color: #94A3B8;
+    }
+
+    /* NAVIGATION TABS */
+    .tab-bar {
+      background-color: #1E293B;
+      padding: 8px 24px;
+      display: flex;
+      gap: 10px;
+      border-bottom: 1px solid #334155;
+      overflow-x: auto;
+    }
+    .tab-btn {
+      background-color: #334155;
+      color: #94A3B8;
+      border: none;
+      padding: 8px 16px;
+      border-radius: 20px;
+      font-size: 13px;
+      font-weight: 600;
+      cursor: pointer;
+      white-space: nowrap;
+      transition: all 0.2s ease;
+    }
+    .tab-btn:hover {
+      background-color: #475569;
+      color: #FFFFFF;
+    }
+    .tab-btn.active {
+      background-color: var(--primary);
+      color: #FFFFFF;
+    }
+
+    /* MAIN CONTAINER */
+    main {
+      flex: 1;
+      padding: 24px;
+      max-width: 1200px;
+      margin: 0 auto;
+      width: 100%;
+    }
+
+    .tab-pane {
+      display: none;
+    }
+    .tab-pane.active {
+      display: block;
+    }
+
+    /* =========================================
+       BÀI TẬP 1: MÀN HÌNH LOGIN
+       ========================================= */
+    .login-wrapper {
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+      padding: 20px 0;
+    }
+    .login-card {
+      width: 100%;
+      max-width: 400px;
+      background-color: #FFFFFF;
+      border-radius: 20px;
+      padding: 28px 24px;
+      border: 1px solid var(--border);
+      box-shadow: 0 10px 25px -5px rgba(0, 0, 0, 0.05), 0 8px 10px -6px rgba(0, 0, 0, 0.01);
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+    }
+    .logo-badge {
+      width: 64px;
+      height: 64px;
+      border-radius: 32px;
+      background-color: #EFF6FF;
+      border: 1.5px solid #BFDBFE;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      font-size: 32px;
+      margin-bottom: 12px;
+    }
+    .login-title {
+      font-size: 24px;
+      font-weight: 800;
+      color: #0F172A;
+      margin-bottom: 6px;
+      text-align: center;
+    }
+    .login-sub {
+      font-size: 13px;
+      color: var(--text-sub);
+      margin-bottom: 22px;
+      text-align: center;
+      line-height: 1.4;
+    }
+    .form-group {
+      width: 100%;
+      margin-bottom: 16px;
+    }
+    .form-label {
+      display: block;
+      font-size: 13px;
+      font-weight: 600;
+      color: #334155;
+      margin-bottom: 6px;
+    }
+    .input-box {
+      display: flex;
+      align-items: center;
+      background-color: #F8FAFC;
+      border: 1.5px solid #CBD5E1;
+      border-radius: 12px;
+      padding: 0 12px;
+      height: 48px;
+      transition: border-color 0.2s;
+    }
+    .input-box:focus-within {
+      border-color: var(--border-focus);
+      background-color: #FFFFFF;
+    }
+    .input-box input {
+      flex: 1;
+      border: none;
+      outline: none;
+      background: transparent;
+      font-size: 14.5px;
+      color: #0F172A;
+      font-weight: 500;
+      padding-left: 8px;
+    }
+    .forgot-link-box {
+      width: 100%;
+      display: flex;
+      justify-content: flex-end;
+      margin-bottom: 20px;
+    }
+    .forgot-link {
+      font-size: 13.5px;
+      font-weight: 700;
+      color: var(--primary);
+      text-decoration: none;
+      cursor: pointer;
+    }
+    .forgot-link:hover {
+      text-decoration: underline;
+    }
+    .btn-login {
+      width: 100%;
+      background-color: var(--primary);
+      color: #FFFFFF;
+      border: none;
+      padding: 14px;
+      border-radius: 12px;
+      font-size: 15px;
+      font-weight: 700;
+      letter-spacing: 0.8px;
+      cursor: pointer;
+      box-shadow: 0 4px 12px rgba(37, 99, 235, 0.25);
+      transition: background-color 0.2s;
+    }
+    .btn-login:hover {
+      background-color: var(--primary-hover);
+    }
+    .divider-row {
+      display: flex;
+      align-items: center;
+      width: 100%;
+      margin: 20px 0;
+    }
+    .divider-line {
+      flex: 1;
+      height: 1px;
+      background-color: #E2E8F0;
+    }
+    .divider-text {
+      padding: 0 12px;
+      font-size: 11px;
+      font-weight: 700;
+      color: #94A3B8;
+    }
+    .btn-demo {
+      width: 100%;
+      background-color: #F8FAFC;
+      border: 1px solid #CBD5E1;
+      padding: 10px;
+      border-radius: 10px;
+      font-size: 12.5px;
+      font-weight: 600;
+      color: #475569;
+      cursor: pointer;
+    }
+    .btn-demo:hover {
+      background-color: #F1F5F9;
+    }
+
+    /* Style Spec Card */
+    .spec-card {
+      width: 100%;
+      max-width: 400px;
+      background-color: #FFFFFF;
+      border: 1px solid #CBD5E1;
+      border-radius: 16px;
+      padding: 16px;
+      margin-top: 20px;
+    }
+    .spec-card h4 {
+      font-size: 13.5px;
+      font-weight: 800;
+      color: #1E293B;
+      margin-bottom: 8px;
+    }
+    .spec-card ul {
+      list-style: none;
+      font-size: 12px;
+      color: #475569;
+      line-height: 1.6;
+    }
+    .spec-card ul li strong {
+      color: var(--primary);
+    }
+
+    /* =========================================
+       BÀI TẬP 2: PROFILE CARD & SETTINGS LIST
+       ========================================= */
+    .responsive-toolbar {
+      background-color: #FFFFFF;
+      border: 1px solid var(--border);
+      border-radius: 16px;
+      padding: 16px 20px;
+      margin-bottom: 20px;
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      flex-wrap: wrap;
+      gap: 12px;
+    }
+    .toolbar-left h3 {
+      font-size: 14px;
+      font-weight: 800;
+      color: #1E293B;
+      margin-bottom: 2px;
+    }
+    .toolbar-left p {
+      font-size: 12px;
+      color: var(--text-sub);
+    }
+    .btn-group {
+      display: flex;
+      gap: 8px;
+    }
+    .res-btn {
+      background-color: #F1F5F9;
+      border: 1.5px solid #CBD5E1;
+      padding: 8px 14px;
+      border-radius: 10px;
+      font-size: 12.5px;
+      font-weight: 600;
+      color: #334155;
+      cursor: pointer;
+      transition: all 0.2s ease;
+    }
+    .res-btn:hover {
+      background-color: #E2E8F0;
+    }
+    .res-btn.active {
+      background-color: var(--primary);
+      color: #FFFFFF;
+      border-color: var(--primary);
+    }
+
+    /* Frame container for simulation */
+    .emulator-wrapper {
+      display: flex;
+      justify-content: center;
+      transition: all 0.3s ease;
+    }
+    .emulator-frame {
+      width: 100%;
+      transition: max-width 0.3s ease;
+    }
+    .emulator-frame.small-screen {
+      max-width: 380px;
+      background-color: #FFFFFF;
+      border: 8px solid #334155;
+      border-radius: 36px;
+      padding: 16px;
+      box-shadow: 0 20px 40px rgba(0,0,0,0.15);
+    }
+    .emulator-frame.large-screen {
+      max-width: 960px;
+      background-color: #FFFFFF;
+      border: 12px solid #334155;
+      border-radius: 28px;
+      padding: 24px;
+      box-shadow: 0 25px 50px rgba(0,0,0,0.15);
+    }
+
+    /* Responsive Flexbox Layout for Bài 2 */
+    .responsive-layout {
+      display: flex;
+      gap: 20px;
+      width: 100%;
+    }
+    /* Default is column (Mobile / Small screen) */
+    .responsive-layout.layout-column {
+      flex-direction: column;
+    }
+    /* Large screen is row (Tablet / Two columns) */
+    .responsive-layout.layout-row {
+      flex-direction: row;
+      align-items: flex-start;
+    }
+    .responsive-layout.layout-row .profile-col {
+      flex: 0 0 340px;
+    }
+    .responsive-layout.layout-row .settings-col {
+      flex: 1;
+    }
+
+    /* PROFILE CARD STYLING */
+    .profile-card {
+      background-color: #FFFFFF;
+      border-radius: 20px;
+      border: 1px solid var(--border);
+      overflow: hidden;
+      box-shadow: 0 4px 14px rgba(0, 0, 0, 0.05);
+    }
+    .profile-banner {
+      height: 90px;
+      background: linear-gradient(135deg, #1E40AF 0%, #3B82F6 100%);
+      display: flex;
+      justify-content: flex-end;
+      padding: 12px;
+    }
+    .badge-pro {
+      background-color: #F59E0B;
+      color: #78350F;
+      font-size: 10px;
+      font-weight: 800;
+      padding: 4px 10px;
+      border-radius: 12px;
+      height: fit-content;
+    }
+    .profile-body {
+      padding: 0 20px 20px 20px;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      text-align: center;
+    }
+    .avatar-wrapper {
+      position: relative;
+      margin-top: -45px;
+      margin-bottom: 10px;
+    }
+    .avatar-img {
+      width: 86px;
+      height: 86px;
+      border-radius: 43px;
+      background-color: #EEF2FF;
+      border: 4px solid #FFFFFF;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      font-size: 42px;
+      box-shadow: 0 4px 10px rgba(0,0,0,0.12);
+    }
+    .online-indicator {
+      position: absolute;
+      bottom: 2px;
+      right: 2px;
+      width: 20px;
+      height: 20px;
+      border-radius: 10px;
+      background-color: #FFFFFF;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+    }
+    .online-dot {
+      width: 14px;
+      height: 14px;
+      border-radius: 7px;
+      background-color: var(--success);
+    }
+    .user-name {
+      font-size: 20px;
+      font-weight: 800;
+      color: #0F172A;
+      margin-bottom: 4px;
+    }
+    .user-role {
+      font-size: 13.5px;
+      font-weight: 700;
+      color: var(--primary);
+      margin-bottom: 3px;
+    }
+    .user-org {
+      font-size: 12.5px;
+      color: #64748B;
+      margin-bottom: 2px;
+    }
+    .user-mssv {
+      font-size: 12px;
+      font-weight: 600;
+      color: #94A3B8;
+      margin-bottom: 12px;
+    }
+    .tags-flex {
+      display: flex;
+      flex-wrap: wrap;
+      justify-content: center;
+      gap: 6px;
+      margin-bottom: 16px;
+    }
+    .tag-item {
+      background-color: #F1F5F9;
+      border: 1px solid var(--border);
+      padding: 4px 8px;
+      border-radius: 8px;
+      font-size: 11px;
+      font-weight: 600;
+      color: #334155;
+    }
+    .stats-row {
+      display: flex;
+      justify-content: space-around;
+      align-items: center;
+      background-color: #F8FAFC;
+      border: 1px solid var(--border);
+      border-radius: 14px;
+      padding: 12px 8px;
+      width: 100%;
+      margin-bottom: 16px;
+    }
+    .stat-col {
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      flex: 1;
+    }
+    .stat-val {
+      font-size: 17px;
+      font-weight: 800;
+      color: #0F172A;
+    }
+    .stat-lbl {
+      font-size: 11px;
+      font-weight: 600;
+      color: #64748B;
+    }
+    .stat-sep {
+      width: 1px;
+      height: 24px;
+      background-color: #CBD5E1;
+    }
+    .profile-actions {
+      display: flex;
+      width: 100%;
+      gap: 10px;
+    }
+    .btn-edit {
+      flex: 2;
+      background-color: var(--primary);
+      color: #FFFFFF;
+      border: none;
+      padding: 10px;
+      border-radius: 10px;
+      font-size: 13px;
+      font-weight: 700;
+      cursor: pointer;
+    }
+    .btn-share {
+      flex: 1;
+      background-color: #F1F5F9;
+      border: 1px solid #CBD5E1;
+      padding: 10px;
+      border-radius: 10px;
+      font-size: 13px;
+      font-weight: 600;
+      color: #334155;
+      cursor: pointer;
+    }
+
+    /* SETTINGS LIST STYLING */
+    .settings-group {
+      margin-bottom: 16px;
+    }
+    .group-header {
+      font-size: 11.5px;
+      font-weight: 800;
+      color: #64748B;
+      letter-spacing: 0.6px;
+      margin-bottom: 8px;
+      padding-left: 4px;
+    }
+    .group-card {
+      background-color: #FFFFFF;
+      border-radius: 16px;
+      border: 1px solid var(--border);
+      overflow: hidden;
+      box-shadow: 0 2px 6px rgba(0,0,0,0.03);
+    }
+    .setting-row {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      padding: 12px 16px;
+      cursor: pointer;
+      transition: background-color 0.15s;
+    }
+    .setting-row:hover {
+      background-color: #F8FAFC;
+    }
+    .setting-left {
+      display: flex;
+      align-items: center;
+      gap: 12px;
+      flex: 1;
+    }
+    .setting-icon {
+      width: 38px;
+      height: 38px;
+      border-radius: 10px;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      font-size: 18px;
+      flex-shrink: 0;
+    }
+    .setting-text h5 {
+      font-size: 14px;
+      font-weight: 700;
+      color: #0F172A;
+      margin-bottom: 2px;
+    }
+    .setting-text p {
+      font-size: 12px;
+      color: #64748B;
+    }
+    .row-sep {
+      height: 1px;
+      background-color: #F1F5F9;
+      margin-left: 66px;
+    }
+    .chevron-right {
+      font-size: 20px;
+      color: #94A3B8;
+      font-weight: 300;
+    }
+    .badge-pill {
+      font-size: 12px;
+      font-weight: 600;
+      color: var(--primary);
+      background-color: #EFF6FF;
+      padding: 3px 8px;
+      border-radius: 6px;
+    }
+
+    /* Switch CSS */
+    .switch {
+      position: relative;
+      display: inline-block;
+      width: 44px;
+      height: 24px;
+    }
+    .switch input {
+      opacity: 0;
+      width: 0;
+      height: 0;
+    }
+    .slider {
+      position: absolute;
+      cursor: pointer;
+      top: 0;
+      left: 0;
+      right: 0;
+      bottom: 0;
+      background-color: #CBD5E1;
+      transition: .3s;
+      border-radius: 24px;
+    }
+    .slider:before {
+      position: absolute;
+      content: "";
+      height: 18px;
+      width: 18px;
+      left: 3px;
+      bottom: 3px;
+      background-color: white;
+      transition: .3s;
+      border-radius: 50%;
+    }
+    input:checked + .slider {
+      background-color: var(--primary);
+    }
+    input:checked + .slider:before {
+      transform: translateX(20px);
+    }
+
+    .btn-logout {
+      width: 100%;
+      background-color: #FEF2F2;
+      border: 1.5px solid #FECACA;
+      border-radius: 14px;
+      padding: 14px;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      gap: 8px;
+      color: var(--danger);
+      font-size: 14.5px;
+      font-weight: 800;
+      cursor: pointer;
+      margin-top: 10px;
+      transition: background-color 0.2s;
+    }
+    .btn-logout:hover {
+      background-color: #FEE2E2;
+    }
+
+    /* =========================================
+       TAB LÝ THUYẾT
+       ========================================= */
+    .theory-box {
+      background: #FFFFFF;
+      border-radius: 16px;
+      border: 1px solid var(--border);
+      padding: 20px;
+      margin-bottom: 16px;
+    }
+    .theory-box h3 {
+      font-size: 16px;
+      font-weight: 800;
+      color: #0F172A;
+      margin-bottom: 8px;
+    }
+    .theory-box pre {
+      background: #0F172A;
+      color: #F8FAFC;
+      padding: 16px;
+      border-radius: 12px;
+      font-size: 13px;
+      overflow-x: auto;
+      line-height: 1.5;
+    }
+  </style>
+</head>
+<body>
+
+  <!-- HEADER TRANG -->
+  <header>
+    <span class="header-badge">REACT NATIVE • TUẦN 09 WEB RUNNER</span>
+    <h1 class="header-title">StyleSheet, Flexbox Layout & Responsive UI</h1>
+    <div class="header-meta">
+      Sinh viên: <strong>Bùi Quang Duy - Lê Duy Linh</strong> • Lớp: <strong>12325W.3</strong> • MSSV: <strong>11223077 - 11223078</strong> • SPKTHY
+    </div>
+  </header>
+
+  <!-- NAVIGATION TABS -->
+  <nav class="tab-bar">
+    <button class="tab-btn active" onclick="switchTab('tab-all')">⭐ Xem Toàn Bộ</button>
+    <button class="tab-btn" onclick="switchTab('tab-bai1')">🔐 Bài 1: Login Screen</button>
+    <button class="tab-btn" onclick="switchTab('tab-bai2')">👤 Bài 2: Profile & Settings (Responsive)</button>
+    <button class="tab-btn" onclick="switchTab('tab-theory')">📖 5 Câu Lý Thuyết</button>
+  </nav>
+
+  <!-- MAIN VIEWPORT -->
+  <main>
+    <!-- TAB 1: BÀI TẬP 1 LOGIN SCREEN -->
+    <section id="tab-bai1" class="tab-pane">
+      <div class="login-wrapper">
+        <div class="login-card">
+          <div class="logo-badge">📝</div>
+          <h2 class="login-title">EduNotes UTEHY</h2>
+          <p class="login-sub">Hệ thống Sổ tay & Quản lý Học tập Sinh viên</p>
+
+          <div class="form-group">
+            <label class="form-label">Tên tài khoản hoặc Email:</label>
+            <div class="input-box">
+              <span>📧</span>
+              <input type="text" id="login-email" value="sinhvien.utehy@edu.vn" placeholder="Nhập email...">
+            </div>
+          </div>
+
+          <div class="form-group">
+            <label class="form-label">Mật khẩu bảo mật:</label>
+            <div class="input-box">
+              <span>🔒</span>
+              <input type="password" id="login-pwd" value="utehy@2026" placeholder="Nhập mật khẩu...">
+              <span style="cursor:pointer;" onclick="togglePassword()">👁️</span>
+            </div>
+          </div>
+
+          <div class="forgot-link-box">
+            <a class="forgot-link" onclick="handleForgot()">Forgot password?</a>
+          </div>
+
+          <button class="btn-login" onclick="handleLogin()">ĐĂNG NHẬP</button>
+
+          <div class="divider-row">
+            <div class="divider-line"></div>
+            <span class="divider-text">HOẶC</span>
+            <div class="divider-line"></div>
+          </div>
+
+          <button class="btn-demo" onclick="fillDemo()">⚡ Điền tài khoản trải nghiệm mẫu</button>
+        </div>
+
+        <div class="spec-card">
+          <h4>📋 Thuộc tính StyleSheet.create() sử dụng:</h4>
+          <ul>
+            <li>• <strong>backgroundColor</strong>: #F1F5F9 (nền), #FFFFFF (card), #2563EB (nút).</li>
+            <li>• <strong>fontSize</strong>: 24px (tiêu đề), 15px (nút bấm), 13px (nhãn).</li>
+            <li>• <strong>fontWeight</strong>: '800' (tiêu đề), '700' (nút), '600' (nhãn form).</li>
+            <li>• <strong>padding & margin</strong>: đệm nút 14px, lề cách đoạn 16px - 20px.</li>
+            <li>• <strong>borderWidth & borderRadius</strong>: viền 1.5px, bo góc 12px và 20px.</li>
+            <li>• <strong>justifyContent & alignItems</strong>: 'center', 'space-between'.</li>
+          </ul>
+        </div>
+      </div>
+    </section>
+
+    <!-- TAB 2: BÀI TẬP 2 PROFILE & SETTINGS RESPONSIVE -->
+    <section id="tab-bai2" class="tab-pane">
+      <div class="responsive-toolbar">
+        <div class="toolbar-left">
+          <h3>📐 BỘ GIẢ LẬP KÍCH THƯỚC RESPONSIVE</h3>
+          <p id="res-status">Kích thước: <strong>Màn hình lớn (768px - Tablet)</strong> • Bố cục Flexbox: <strong>2 Cột Song Song</strong></p>
+        </div>
+        <div class="btn-group">
+          <button class="res-btn" id="btn-small" onclick="setScreenSize('small')">📱 Màn hình nhỏ (360px)</button>
+          <button class="res-btn active" id="btn-large" onclick="setScreenSize('large')">💻 Màn hình lớn (768px)</button>
+          <button class="res-btn" id="btn-full" onclick="setScreenSize('full')">🔄 Toàn màn hình</button>
+        </div>
+      </div>
+
+      <div class="emulator-wrapper">
+        <div id="emulator-box" class="emulator-frame large-screen">
+          <div id="layout-container" class="responsive-layout layout-row">
+            
+            <!-- CỘT TRÁI: PROFILE CARD -->
+            <div class="profile-col">
+              <div class="profile-card">
+                <div class="profile-banner">
+                  <span class="badge-pro">PRO MEMBER</span>
+                </div>
+                <div class="profile-body">
+                  <div class="avatar-wrapper">
+                    <div class="avatar-img">👨‍💻</div>
+                    <div class="online-indicator">
+                      <div class="online-dot"></div>
+                    </div>
+                  </div>
+                  <h3 class="user-name">Bùi Quang Duy</h3>
+                  <div class="user-role">Mobile & Fullstack Developer</div>
+                  <div class="user-org">Khoa CNTT • SPKT Hưng Yên (UTEHY)</div>
+                  <div class="user-mssv">MSSV: 11223077 • Lớp 12325W.3</div>
+
+                  <div class="tags-flex">
+                    <span class="tag-item">⚛️ React Native</span>
+                    <span class="tag-item">🎨 UI/UX Flexbox</span>
+                    <span class="tag-item">📱 Expo Go</span>
+                  </div>
+
+                  <div class="stats-row">
+                    <div class="stat-col">
+                      <span class="stat-val">48</span>
+                      <span class="stat-lbl">Ghi chú</span>
+                    </div>
+                    <div class="stat-sep"></div>
+                    <div class="stat-col">
+                      <span class="stat-val">12</span>
+                      <span class="stat-lbl">Thư mục</span>
+                    </div>
+                    <div class="stat-sep"></div>
+                    <div class="stat-col">
+                      <span class="stat-val">98.5%</span>
+                      <span class="stat-lbl">Tiến độ</span>
+                    </div>
+                  </div>
+
+                  <div class="profile-actions">
+                    <button class="btn-edit" onclick="alert('Mở form chỉnh sửa hồ sơ!')">✏️ Chỉnh sửa hồ sơ</button>
+                    <button class="btn-share" onclick="alert('Đã sao chép link hồ sơ!')">🔗 Chia sẻ</button>
+                  </div>
+                </div>
+              </div>
+            </div>
+
+            <!-- CỘT PHẢI: SETTINGS LIST -->
+            <div class="settings-col">
+              <!-- NHÓM 1: BẢO MẬT -->
+              <div class="settings-group">
+                <div class="group-header">🔒 TÀI KHOẢN & BẢO MẬT</div>
+                <div class="group-card">
+                  <div class="setting-row" onclick="alert('Mở form đổi mật khẩu')">
+                    <div class="setting-left">
+                      <div class="setting-icon" style="background-color: #EFF6FF;">🔑</div>
+                      <div class="setting-text">
+                        <h5>Đổi mật khẩu đăng nhập</h5>
+                        <p>Cập nhật lần cuối: 28 ngày trước</p>
+                      </div>
+                    </div>
+                    <span class="chevron-right">›</span>
+                  </div>
+
+                  <div class="row-sep"></div>
+
+                  <div class="setting-row">
+                    <div class="setting-left">
+                      <div class="setting-icon" style="background-color: #F0FDF4;">🛡️</div>
+                      <div class="setting-text">
+                        <h5>Xác thực 2 bước (2FA)</h5>
+                        <p>Tăng cường an toàn qua mã OTP</p>
+                      </div>
+                    </div>
+                    <label class="switch">
+                      <input type="checkbox" checked>
+                      <span class="slider"></span>
+                    </label>
+                  </div>
+
+                  <div class="row-sep"></div>
+
+                  <div class="setting-row">
+                    <div class="setting-left">
+                      <div class="setting-icon" style="background-color: #FAF5FF;">👁️</div>
+                      <div class="setting-text">
+                        <h5>Khóa sinh trắc học Face ID / Vân tay</h5>
+                        <p>Mở khóa ứng dụng siêu tốc</p>
+                      </div>
+                    </div>
+                    <label class="switch">
+                      <input type="checkbox">
+                      <span class="slider"></span>
+                    </label>
+                  </div>
+                </div>
+              </div>
+
+              <!-- NHÓM 2: GIAO DIỆN -->
+              <div class="settings-group">
+                <div class="group-header">🎨 GIAO DIỆN & TÙY BIẾN</div>
+                <div class="group-card">
+                  <div class="setting-row">
+                    <div class="setting-left">
+                      <div class="setting-icon" style="background-color: #FEF3C7;">🌙</div>
+                      <div class="setting-text">
+                        <h5>Giao diện tối (Dark Mode)</h5>
+                        <p>Bảo vệ mắt khi học ban đêm</p>
+                      </div>
+                    </div>
+                    <label class="switch">
+                      <input type="checkbox">
+                      <span class="slider"></span>
+                    </label>
+                  </div>
+
+                  <div class="row-sep"></div>
+
+                  <div class="setting-row" onclick="alert('Cài đặt cỡ chữ')">
+                    <div class="setting-left">
+                      <div class="setting-icon" style="background-color: #F0FDFA;">🔤</div>
+                      <div class="setting-text">
+                        <h5>Kích thước phông chữ</h5>
+                        <p>Đang chọn: Tiêu chuẩn (14px)</p>
+                      </div>
+                    </div>
+                    <span class="badge-pill">Tiêu chuẩn</span>
+                    <span class="chevron-right">›</span>
+                  </div>
+
+                  <div class="row-sep"></div>
+
+                  <div class="setting-row" onclick="alert('Cài đặt ngôn ngữ')">
+                    <div class="setting-left">
+                      <div class="setting-icon" style="background-color: #EFF6FF;">🌐</div>
+                      <div class="setting-text">
+                        <h5>Ngôn ngữ hiển thị</h5>
+                        <p>Tiếng Việt (Vietnam)</p>
+                      </div>
+                    </div>
+                    <span class="badge-pill">VIE</span>
+                    <span class="chevron-right">›</span>
+                  </div>
+                </div>
+              </div>
+
+              <!-- NHÓM 3: THÔNG BÁO -->
+              <div class="settings-group">
+                <div class="group-header">🔔 THÔNG BÁO & NHẮC NHỞ</div>
+                <div class="group-card">
+                  <div class="setting-row">
+                    <div class="setting-left">
+                      <div class="setting-icon" style="background-color: #ECFEFF;">📲</div>
+                      <div class="setting-text">
+                        <h5>Thông báo đẩy (Push Notifications)</h5>
+                        <p>Nhận lịch thi & nhắc việc học</p>
+                      </div>
+                    </div>
+                    <label class="switch">
+                      <input type="checkbox" checked>
+                      <span class="slider"></span>
+                    </label>
+                  </div>
+
+                  <div class="row-sep"></div>
+
+                  <div class="setting-row">
+                    <div class="setting-left">
+                      <div class="setting-icon" style="background-color: #FDF2F8;">🔊</div>
+                      <div class="setting-text">
+                        <h5>Âm thanh & Rung</h5>
+                        <p>Chuông báo khi có thông báo mới</p>
+                      </div>
+                    </div>
+                    <label class="switch">
+                      <input type="checkbox" checked>
+                      <span class="slider"></span>
+                    </label>
+                  </div>
+                </div>
+              </div>
+
+              <!-- NHÓM 4: HỆ THỐNG -->
+              <div class="settings-group">
+                <div class="group-header">⚙️ HỆ THỐNG & HỖ TRỢ</div>
+                <div class="group-card">
+                  <div class="setting-row" onclick="alert('Đã dọn dẹp xong 24.5 MB cache!')">
+                    <div class="setting-left">
+                      <div class="setting-icon" style="background-color: #F3F4F6;">🧹</div>
+                      <div class="setting-text">
+                        <h5>Dọn dẹp bộ nhớ đệm (Cache)</h5>
+                        <p>24.5 MB tệp tạm thời</p>
+                      </div>
+                    </div>
+                    <span class="badge-pill" style="color: #EA580C; background: #FFF7ED;">Dọn dẹp</span>
+                  </div>
+
+                  <div class="row-sep"></div>
+
+                  <div class="setting-row" onclick="alert('Phiên bản v1.0.9 Build 26')">
+                    <div class="setting-left">
+                      <div class="setting-icon" style="background-color: #EEF2FF;">ℹ️</div>
+                      <div class="setting-text">
+                        <h5>Thông tin ứng dụng</h5>
+                        <p>EduNotes Mobile • UTEHY 2026</p>
+                      </div>
+                    </div>
+                    <span class="badge-pill" style="color: #475569; background: #F1F5F9;">v1.0.9</span>
+                  </div>
+                </div>
+              </div>
+
+              <button class="btn-logout" onclick="alert('Đã đăng xuất tài khoản!')">
+                <span>🚪</span> Đăng xuất khỏi thiết bị
+              </button>
+            </div>
+
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <!-- TAB 3: TỔNG HỢP TOÀN BỘ -->
+    <section id="tab-all" class="tab-pane active">
+      <div style="background: #EFF6FF; border: 1px solid #BFDBFE; border-radius: 14px; padding: 18px; margin-bottom: 24px;">
+        <h3 style="color: #1D4ED8; font-size: 16px; font-weight: 800; margin-bottom: 6px;">🚀 Tổng quan bài nộp Tuần 09 - React Native</h3>
+        <p style="color: #1E3A8A; font-size: 13.5px; line-height: 1.5;">
+          Bao gồm đầy đủ <strong>Bài tập 1 (Mức dễ - Màn hình Login)</strong> và <strong>Bài tập 2 (Mức trung bình - Profile Card & Settings List chuẩn Flexbox & Responsive)</strong>. Toàn bộ style được viết bằng <code>StyleSheet.create()</code>, giao diện chuẩn hóa và co giãn mượt mà theo kích thước màn hình!
+        </p>
+      </div>
+
+      <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(360px, 1fr)); gap: 24px;">
+        <!-- Card Preview Bài 1 -->
+        <div style="background: #FFF; border-radius: 16px; border: 1px solid var(--border); padding: 20px;">
+          <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 12px;">
+            <span style="background: #0F172A; color: #38BDF8; font-size: 10px; font-weight: 800; padding: 3px 8px; border-radius: 6px;">BÀI TẬP 1 (DỄ)</span>
+            <button class="tab-btn" onclick="switchTab('tab-bai1')" style="font-size: 11px; padding: 4px 10px;">Xem riêng ➔</button>
+          </div>
+          <h4 style="font-size: 16px; font-weight: 800; margin-bottom: 8px;">🔐 Màn hình Login Screen</h4>
+          <p style="font-size: 13px; color: #64748B; margin-bottom: 14px;">Giao diện đăng nhập gồm tiêu đề, 2 ô nhập, nút bấm, "Forgot password" và 100% thuộc tính StyleSheet yêu cầu.</p>
+          <div style="transform: scale(0.92); transform-origin: top center;">
+            <div class="login-card" style="margin: 0 auto; box-shadow: none; border-color: #CBD5E1;">
+              <div class="logo-badge" style="width:50px; height:50px; font-size:24px;">📝</div>
+              <h2 class="login-title" style="font-size: 18px;">EduNotes UTEHY</h2>
+              <p class="login-sub" style="font-size: 11px; margin-bottom: 14px;">Hệ thống Sổ tay & Học tập</p>
+              <div class="form-group" style="margin-bottom: 10px;">
+                <label class="form-label" style="font-size: 11px;">Tên tài khoản / Email:</label>
+                <div class="input-box" style="height: 38px;"><span>📧</span><input type="text" value="sinhvien.utehy@edu.vn" readonly style="font-size: 12px;"></div>
+              </div>
+              <div class="form-group" style="margin-bottom: 10px;">
+                <label class="form-label" style="font-size: 11px;">Mật khẩu:</label>
+                <div class="input-box" style="height: 38px;"><span>🔒</span><input type="password" value="••••••••" readonly style="font-size: 12px;"></div>
+              </div>
+              <div class="forgot-link-box" style="margin-bottom: 12px;"><a class="forgot-link" style="font-size: 12px;">Forgot password?</a></div>
+              <button class="btn-login" style="padding: 10px; font-size: 13px;">ĐĂNG NHẬP</button>
+            </div>
+          </div>
+        </div>
+
+        <!-- Card Preview Bài 2 -->
+        <div style="background: #FFF; border-radius: 16px; border: 1px solid var(--border); padding: 20px;">
+          <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 12px;">
+            <span style="background: #0F172A; color: #38BDF8; font-size: 10px; font-weight: 800; padding: 3px 8px; border-radius: 6px;">BÀI TẬP 2 (TRUNG BÌNH)</span>
+            <button class="tab-btn" onclick="switchTab('tab-bai2')" style="font-size: 11px; padding: 4px 10px;">Xem riêng ➔</button>
+          </div>
+          <h4 style="font-size: 16px; font-weight: 800; margin-bottom: 8px;">👤 Profile Card & Settings List</h4>
+          <p style="font-size: 13px; color: #64748B; margin-bottom: 14px;">Bố cục Flexbox co giãn đa kích thước: 1 cột trên Mobile và 2 cột trên Tablet/Desktop.</p>
+          <div style="background: #F8FAFC; border: 1px dashed #CBD5E1; border-radius: 12px; padding: 14px;">
+            <div style="display: flex; gap: 12px; align-items: center; margin-bottom: 12px;">
+              <div style="width: 50px; height: 50px; border-radius: 25px; background: #EEF2FF; display: flex; align-items: center; justify-content: center; font-size: 26px;">👨‍💻</div>
+              <div>
+                <h5 style="font-size: 14px; font-weight: 800;">Bùi Quang Duy</h5>
+                <p style="font-size: 11.5px; color: var(--primary); font-weight: 600;">Mobile & Fullstack Dev • UTEHY</p>
+                <p style="font-size: 11px; color: #94A3B8;">MSSV: 11223077 • Lớp 12325W.3</p>
+              </div>
+            </div>
+            <div style="display: grid; grid-template-columns: repeat(3, 1fr); gap: 6px; text-align: center; background: #FFF; padding: 8px; border-radius: 8px; border: 1px solid #E2E8F0; margin-bottom: 10px;">
+              <div><strong style="font-size: 13px;">48</strong><div style="font-size: 10px; color: #64748B;">Ghi chú</div></div>
+              <div><strong style="font-size: 13px;">12</strong><div style="font-size: 10px; color: #64748B;">Thư mục</div></div>
+              <div><strong style="font-size: 13px;">98.5%</strong><div style="font-size: 10px; color: #64748B;">Tiến độ</div></div>
+            </div>
+            <div style="font-size: 11.5px; color: #475569; display: flex; flex-direction: column; gap: 6px;">
+              <div style="display: flex; justify-content: space-between; background: #FFF; padding: 8px 10px; border-radius: 8px; border: 1px solid #E2E8F0;">
+                <span>🔒 Đổi mật khẩu</span><span style="color: #94A3B8;">›</span>
+              </div>
+              <div style="display: flex; justify-content: space-between; background: #FFF; padding: 8px 10px; border-radius: 8px; border: 1px solid #E2E8F0;">
+                <span>🛡️ Xác thực 2 bước (2FA)</span><span style="color: var(--success); font-weight: 700;">BẬT</span>
+              </div>
+              <div style="display: flex; justify-content: space-between; background: #FFF; padding: 8px 10px; border-radius: 8px; border: 1px solid #E2E8F0;">
+                <span>🌙 Chế độ tối Dark Mode</span><span style="color: #64748B;">TẮT</span>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <!-- TAB 4: LÝ THUYẾT -->
+    <section id="tab-theory" class="tab-pane">
+      <div class="theory-box">
+        <h3>📖 Câu 1: So sánh StyleSheet.create() và Inline Style</h3>
+        <p style="font-size: 13px; color: #475569; margin-bottom: 10px;">StyleSheet.create() tối ưu hóa bằng cách gửi Style ID (số nguyên) qua JavaScript Bridge thay vì toàn bộ object trong mỗi lần render, đồng thời kiểm tra lỗi chính tả lúc khởi chạy.</p>
+      </div>
+
+      <div class="theory-box">
+        <h3>📖 Câu 2: Flexbox trong React Native vs CSS Web</h3>
+        <p style="font-size: 13px; color: #475569; margin-bottom: 10px;">Hướng trục chính mặc định là <code>flexDirection: 'column'</code>, không có đơn vị px/rem/em, display chỉ hỗ trợ <code>'flex'</code> hoặc <code>'none'</code>, tính toán bởi Yoga Engine C++.</p>
+      </div>
+
+      <div class="theory-box">
+        <h3>📖 Câu 3: Các thuộc tính căn chỉnh chính</h3>
+        <p style="font-size: 13px; color: #475569; margin-bottom: 10px;"><code>justifyContent</code> (trục chính), <code>alignItems</code> (trục phụ), <code>alignSelf</code> (ghi đè cá nhân), <code>flexWrap: 'wrap'</code> và <code>gap</code>.</p>
+      </div>
+
+      <div class="theory-box">
+        <h3>📖 Câu 4: Kỹ thuật Responsive UI</h3>
+        <p style="font-size: 13px; color: #475569; margin-bottom: 10px;">Sử dụng <code>useWindowDimensions()</code> kết hợp breakpoint 640px để chuyển đổi linh hoạt giữa 1 cột dọc (Mobile) và 2 cột song song (Tablet/PC).</p>
+      </div>
+
+      <div class="theory-box">
+        <h3>📖 Câu 5: Box Model trong React Native</h3>
+        <p style="font-size: 13px; color: #475569; margin-bottom: 10px;">Mặc định là <code>border-box</code> và hoàn toàn KHÔNG xảy ra hiện tượng Margin Collapsing (chập lề) như trên CSS Web.</p>
+      </div>
+    </section>
+  </main>
+
+  <script>
+    function switchTab(tabId) {
+      document.querySelectorAll('.tab-pane').forEach(el => el.classList.remove('active'));
+      document.querySelectorAll('.tab-btn').forEach(el => el.classList.remove('active'));
+      document.getElementById(tabId).classList.add('active');
+      event.target.classList.add('active');
+    }
+
+    function togglePassword() {
+      const pwd = document.getElementById('login-pwd');
+      pwd.type = pwd.type === 'password' ? 'text' : 'password';
+    }
+
+    function handleLogin() {
+      const email = document.getElementById('login-email').value;
+      alert('🎉 Đăng nhập thành công với tài khoản: ' + email);
+    }
+
+    function handleForgot() {
+      const email = prompt('Nhập địa chỉ email để nhận liên kết khôi phục mật khẩu:', 'sinhvien.utehy@edu.vn');
+      if (email) {
+        alert('Liên kết khôi phục đã được gửi tới: ' + email);
+      }
+    }
+
+    function fillDemo() {
+      document.getElementById('login-email').value = 'guest.demo@utehy.vn';
+      document.getElementById('login-pwd').value = 'demo1234';
+    }
+
+    function setScreenSize(size) {
+      const box = document.getElementById('emulator-box');
+      const layout = document.getElementById('layout-container');
+      const status = document.getElementById('res-status');
+
+      document.querySelectorAll('.res-btn').forEach(b => b.classList.remove('active'));
+
+      if (size === 'small') {
+        document.getElementById('btn-small').classList.add('active');
+        box.className = 'emulator-frame small-screen';
+        layout.className = 'responsive-layout layout-column';
+        status.innerHTML = 'Kích thước: <strong>Màn hình nhỏ (360px - Mobile)</strong> • Bố cục Flexbox: <strong>1 Cột Xếp Dọc</strong>';
+      } else if (size === 'large') {
+        document.getElementById('btn-large').classList.add('active');
+        box.className = 'emulator-frame large-screen';
+        layout.className = 'responsive-layout layout-row';
+        status.innerHTML = 'Kích thước: <strong>Màn hình lớn (768px - Tablet)</strong> • Bố cục Flexbox: <strong>2 Cột Song Song</strong>';
+      } else {
+        document.getElementById('btn-full').classList.add('active');
+        box.className = 'emulator-frame';
+        layout.className = 'responsive-layout layout-row';
+        status.innerHTML = 'Kích thước: <strong>Toàn màn hình</strong> • Bố cục Flexbox: <strong>Tự động co giãn thích ứng</strong>';
+      }
+    }
+  </script>
+</body>
+</html>
